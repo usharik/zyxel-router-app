@@ -1,0 +1,52 @@
+{
+  "Object" : [
+    {
+      "DisableDefaultGw" : false,
+      "Enable" : false,
+      "idx" : 1,
+      "Index" : 1,
+      "Interface" : "ADSL",
+      "RipOpMode" : "Active",
+      "Version" : "RIPv2"
+    },
+    {
+      "DisableDefaultGw" : false,
+      "Enable" : false,
+      "idx" : 2,
+      "Index" : 2,
+      "Interface" : "VDSL",
+      "RipOpMode" : "Active",
+      "Version" : "RIPv2"
+    },
+    {
+      "DisableDefaultGw" : false,
+      "Enable" : false,
+      "idx" : 3,
+      "Index" : 3,
+      "Interface" : "DATA",
+      "RipOpMode" : "Active",
+      "Version" : "RIPv2"
+    },
+    {
+      "DisableDefaultGw" : false,
+      "Enable" : false,
+      "idx" : 4,
+      "Index" : 4,
+      "Interface" : "DATA_848",
+      "RipOpMode" : "Active",
+      "Version" : "RIPv2"
+    },
+    {
+      "DisableDefaultGw" : false,
+      "Enable" : false,
+      "idx" : 5,
+      "Index" : 5,
+      "Interface" : "DATA_IPoE",
+      "RipOpMode" : "Active",
+      "Version" : "RIPv2"
+    }
+  ],
+  "ReplyMsg" : "Ripitf_Enable",
+  "ReplyMsgMultiLang" : "",
+  "result" : "ZCFG_SUCCESS"
+}

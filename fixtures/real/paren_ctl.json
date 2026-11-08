@@ -1,0 +1,11 @@
+{
+  "Object" : [
+    {
+      "MaxLenPrentalCtlPrf" : 12,
+      "PrentalCtlEnable" : false
+    }
+  ],
+  "ReplyMsg" : "NetworkServiceList",
+  "ReplyMsgMultiLang" : "",
+  "result" : "ZCFG_SUCCESS"
+}

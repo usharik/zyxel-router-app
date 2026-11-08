@@ -1,0 +1,18 @@
+# macOS / build artifacts
+.DS_Store
+.build/
+**/.build/
+**/build/
+**/.gradle/
+dist/
+*.apk
+
+# Android local
+android/local.properties
+
+# Python
+__pycache__/
+*.pyc
+
+# generated / temp
+mock/*.pem

@@ -1,0 +1,837 @@
+{
+  "Object" : [
+    {
+      "DeviceInfo" : {
+        "AdditionalHardwareVersion" : "",
+        "AdditionalSoftwareVersion" : "",
+        "BootVersion" : "",
+        "Description" : "Dual-Band Wireless AC\/N VDSL2 4-port Combo WAN IAD",
+        "DSLVersion" : "",
+        "FirstUseDate" : "<redacted>",
+        "FixManufacturerOUI" : "54833A",
+        "HardwareVersion" : "VMG8623-T50B",
+        "LocationNumberOfEntries" : 0,
+        "Manufacturer" : "ZYXEL",
+        "ManufacturerOUI" : "54833A",
+        "ModelName" : "VMG8623-T50B",
+        "PackageVersion" : "1.24",
+        "ProcessorNumberOfEntries" : 0,
+        "ProductClass" : "VMG8623-T50B",
+        "ProvisioningCode" : "",
+        "SerialNumber" : "<redacted>",
+        "SoftwareVersion" : "V5.50(ABPM.7.3)V1",
+        "SupportedDataModelNumberOfEntries" : 0,
+        "UpTime" : 22590,
+        "VendorConfigFileNumberOfEntries" : 0,
+        "VendorLogFileNumberOfEntries" : 0,
+        "WiFiDriverVersion" : "",
+        "X_ZYXEL_GponSerialNumber" : "",
+        "X_ZYXEL_Ploam_Password" : "<redacted>",
+        "X_ZYXEL_ProvisioningCodeIntf" : "",
+        "X_ZYXEL_ProvisioningKey" : "<redacted>",
+        "X_ZYXEL_RdpaWanType" : "AUTO"
+      },
+      "Dhcp4SerPoolInfo" : {
+        "Alias" : "",
+        "Chaddr" : "",
+        "ChaddrExclude" : false,
+        "ChaddrMask" : "",
+        "ClientID" : "",
+        "ClientIDExclude" : false,
+        "ClientNumberOfEntries" : 0,
+        "DNSServers" : "192.168.1.1",
+        "DomainName" : "",
+        "Enable" : true,
+        "Interface" : "IP.Interface.1",
+        "IPRouters" : "",
+        "LeaseTime" : 86400,
+        "MaxAddress" : "192.168.1.254",
+        "MinAddress" : "192.168.1.2",
+        "OptionNumberOfEntries" : 3,
+        "Order" : 1,
+        "ReservedAddresses" : "",
+        "StaticAddressNumberOfEntries" : 0,
+        "Status" : "Enabled",
+        "SubnetMask" : "255.255.255.0",
+        "UserClassID" : "",
+        "VendorClassID" : "",
+        "VendorClassIDExclude" : false,
+        "VendorClassIDMode" : "",
+        "X_ZYXEL_AutoReserveLanIp" : false,
+        "X_ZYXEL_DNS_Type" : "DNS Proxy",
+        "X_ZYXEL_ServerConfigurable" : true,
+        "X_ZYXEL_SetEnable" : true,
+        "X_ZYXEL_STB_PrCode" : "",
+        "X_ZYXEL_STB_PrCode_subcode" : 2,
+        "X_ZYXEL_STB_URL" : "",
+        "X_ZYXEL_STB_URL_subcode" : 1,
+        "X_ZYXEL_STB_VENDORID" : ""
+      },
+      "DslChannelInfo" : [
+        {
+          "ACTINP" : 0,
+          "ActualInterleavingDelay" : 0,
+          "Alias" : "",
+          "DownstreamCurrRate" : 0,
+          "DSLUpTime" : "",
+          "Enable" : true,
+          "INPREPORT" : false,
+          "INTLVBLOCK" : 0,
+          "INTLVDEPTH" : 0,
+          "LastChange" : 0,
+          "LinkEncapsulationSupported" : "",
+          "LinkEncapsulationUsed" : "G.992.3_Annex_K_ATM",
+          "LowerLayers" : "DSL.Line.1",
+          "LPATH" : 0,
+          "LSYMB" : 0,
+          "Name" : "",
+          "NFEC" : 0,
+          "RFEC" : 0,
+          "Status" : "Down",
+          "UpstreamCurrRate" : 0,
+          "X_ZYXEL_BondingLineNumber" : 0
+        },
+        {
+          "ACTINP" : 0,
+          "ActualInterleavingDelay" : 0,
+          "Alias" : "",
+          "DownstreamCurrRate" : 185267,
+          "DSLUpTime" : "",
+          "Enable" : true,
+          "INPREPORT" : false,
+          "INTLVBLOCK" : 0,
+          "INTLVDEPTH" : 0,
+          "LastChange" : 0,
+          "LinkEncapsulationSupported" : "",
+          "LinkEncapsulationUsed" : "G.992.3_Annex_K_PTM",
+          "LowerLayers" : "DSL.Line.1",
+          "LPATH" : 0,
+          "LSYMB" : 0,
+          "Name" : "",
+          "NFEC" : 0,
+          "RFEC" : 0,
+          "Status" : "Up",
+          "UpstreamCurrRate" : 55613,
+          "X_ZYXEL_BondingLineNumber" : 0
+        }
+      ],
+      "GponStatsInfo" : {
+        "RxPowerSignal" : "0",
+        "SFP_Model" : "",
+        "SFP_Presence" : false,
+        "SFP_Serial" : "",
+        "SFP_Vendor" : "",
+        "Temperature" : "0",
+        "TxPowerSignal" : "0"
+      },
+      "GuestSSIDEnable" : false,
+      "LanInfo" : [
+        {
+          "Alias" : "",
+          "CurrentBitRate" : 10,
+          "DuplexMode" : "Full",
+          "EEECapability" : false,
+          "EEEEnable" : true,
+          "Enable" : true,
+          "IntfEnable" : true,
+          "IntfStatus" : "",
+          "LastChange" : 0,
+          "LowerLayers" : "",
+          "MACAddress" : "14:33:75:00:00:03",
+          "MaxBitRate" : 1000,
+          "Name" : "eth0.1",
+          "Status" : "Up",
+          "Upstream" : false,
+          "X_ZYXEL_DuplexMode" : "Auto",
+          "X_ZYXEL_LanPort" : "LAN1",
+          "X_ZYXEL_LastChangeTime" : 22482,
+          "X_ZYXEL_MaxBitRate" : -1,
+          "X_ZYXEL_SFP" : false,
+          "X_ZYXEL_SwitchToWAN" : false,
+          "X_ZYXEL_Upstream" : false,
+          "X_ZYXEL_UpTime" : 0
+        },
+        {
+          "Alias" : "",
+          "CurrentBitRate" : 0,
+          "DuplexMode" : "Auto",
+          "EEECapability" : false,
+          "EEEEnable" : true,
+          "Enable" : true,
+          "IntfEnable" : true,
+          "IntfStatus" : "",
+          "LastChange" : 0,
+          "LowerLayers" : "",
+          "MACAddress" : "14:33:75:00:00:04",
+          "MaxBitRate" : 0,
+          "Name" : "eth0.2",
+          "Status" : "Down",
+          "Upstream" : false,
+          "X_ZYXEL_DuplexMode" : "Auto",
+          "X_ZYXEL_LanPort" : "LAN2",
+          "X_ZYXEL_LastChangeTime" : 0,
+          "X_ZYXEL_MaxBitRate" : -1,
+          "X_ZYXEL_SFP" : false,
+          "X_ZYXEL_SwitchToWAN" : false,
+          "X_ZYXEL_Upstream" : false,
+          "X_ZYXEL_UpTime" : 0
+        },
+        {
+          "Alias" : "",
+          "CurrentBitRate" : 0,
+          "DuplexMode" : "Auto",
+          "EEECapability" : false,
+          "EEEEnable" : true,
+          "Enable" : true,
+          "IntfEnable" : true,
+          "IntfStatus" : "",
+          "LastChange" : 0,
+          "LowerLayers" : "",
+          "MACAddress" : "14:33:75:00:00:05",
+          "MaxBitRate" : 0,
+          "Name" : "eth0.3",
+          "Status" : "Down",
+          "Upstream" : false,
+          "X_ZYXEL_DuplexMode" : "Auto",
+          "X_ZYXEL_LanPort" : "LAN3",
+          "X_ZYXEL_LastChangeTime" : 0,
+          "X_ZYXEL_MaxBitRate" : -1,
+          "X_ZYXEL_SFP" : false,
+          "X_ZYXEL_SwitchToWAN" : false,
+          "X_ZYXEL_Upstream" : false,
+          "X_ZYXEL_UpTime" : 0
+        },
+        {
+          "Alias" : "",
+          "CurrentBitRate" : 1000,
+          "DuplexMode" : "Full",
+          "EEECapability" : false,
+          "EEEEnable" : true,
+          "Enable" : true,
+          "IntfEnable" : true,
+          "IntfStatus" : "",
+          "LastChange" : 0,
+          "LowerLayers" : "",
+          "MACAddress" : "14:33:75:00:00:06",
+          "MaxBitRate" : 1000,
+          "Name" : "eth0.4",
+          "Status" : "Down",
+          "Upstream" : false,
+          "X_ZYXEL_DuplexMode" : "Auto",
+          "X_ZYXEL_LanPort" : "LAN4",
+          "X_ZYXEL_LastChangeTime" : 0,
+          "X_ZYXEL_MaxBitRate" : -1,
+          "X_ZYXEL_SFP" : false,
+          "X_ZYXEL_SwitchToWAN" : true,
+          "X_ZYXEL_Upstream" : false,
+          "X_ZYXEL_UpTime" : 0
+        },
+        {
+          "Alias" : "",
+          "CurrentBitRate" : 0,
+          "DuplexMode" : "Auto",
+          "EEECapability" : false,
+          "EEEEnable" : true,
+          "Enable" : true,
+          "IntfEnable" : true,
+          "IntfStatus" : "",
+          "LastChange" : 22590,
+          "LowerLayers" : "",
+          "MACAddress" : "14:33:75:00:00:01",
+          "MaxBitRate" : 0,
+          "Name" : "nas10",
+          "Status" : "Down",
+          "Upstream" : true,
+          "X_ZYXEL_DuplexMode" : "Auto",
+          "X_ZYXEL_LanPort" : "ETHWAN",
+          "X_ZYXEL_LastChangeTime" : 0,
+          "X_ZYXEL_MaxBitRate" : -1,
+          "X_ZYXEL_SFP" : false,
+          "X_ZYXEL_SwitchToWAN" : false,
+          "X_ZYXEL_Upstream" : true,
+          "X_ZYXEL_UpTime" : 0
+        }
+      ],
+      "LanPortInfo" : {
+        "EthConnectionStatus" : "Connection down",
+        "ethPortExist" : true,
+        "LanMac" : "14:33:75:00:00:06"
+      },
+      "oneSsidEnable" : false,
+      "OptIntfInfo" : [
+
+      ],
+      "partctlNum" : 0,
+      "SystemInfo" : {
+        "CBT_AccountReset" : false,
+        "Contact" : "",
+        "DomainName" : "<redacted>",
+        "HostName" : "device-49",
+        "IsHostNameModify" : true,
+        "ledAllEnable" : true,
+        "Location" : "<redacted>",
+        "OnlineGuide" : "",
+        "wanledEnable" : true,
+        "X_ZYXEL_LoginBanner" : "<redacted>"
+      },
+      "WanLanInfo" : [
+        {
+          "BindToIntfGrp" : false,
+          "BridgingBrPath" : "Bridging.Bridge.1",
+          "DefaultGateway" : false,
+          "DHCPLeaseTime" : 0,
+          "DHCPoption42Enable" : false,
+          "DHCPoption42Value" : "",
+          "DHCPStatus" : "Server",
+          "DHCPtr181Path" : "Device.DHCPv4.Server.Pool.1",
+          "dnsv4Server" : [
+
+          ],
+          "dnsv6Server" : [
+
+          ],
+          "Enable" : true,
+          "Encapsulation" : "",
+          "Group_WAN_IpIface" : "",
+          "IpIfacePath" : "IP.Interface.1",
+          "ipoeConnectionUpTime" : 22537,
+          "IPv4Address" : [
+            {
+              "AddressingType" : "Static",
+              "Alias" : "",
+              "Enable" : true,
+              "IPAddress" : "198.51.100.82",
+              "ipIfaceIdx" : 1,
+              "Status" : "Enabled",
+              "SubnetMask" : "255.255.255.0",
+              "X_ZYXEL_Alias" : false,
+              "X_ZYXEL_Dhcp4Subnet_Ref" : "",
+              "X_ZYXEL_IfName" : ""
+            }
+          ],
+          "IPv4Enable" : true,
+          "IPv6Address" : [
+            {
+              "Alias" : "",
+              "Anycast" : false,
+              "Enable" : true,
+              "IPAddress" : "198.51.100.79",
+              "ipIfaceIdx" : 1,
+              "Origin" : "Static",
+              "PreferredLifetime" : "0001-01-01T00:00:00Z",
+              "Prefix" : "",
+              "ValidLifetime" : "0001-01-01T00:00:00Z",
+              "X_ZYXEL_LinkLocalAddrType" : ""
+            },
+            {
+              "Alias" : "",
+              "Anycast" : false,
+              "Enable" : true,
+              "IPAddress" : "198.51.100.190",
+              "IPAddressStatus" : "198.51.100.25",
+              "ipIfaceIdx" : 1,
+              "Origin" : "AutoConfigured",
+              "PreferredLifetime" : "0001-01-01T00:00:00Z",
+              "Prefix" : "IP.Interface.1.IPv6Prefix.1",
+              "Status" : "Enabled",
+              "ValidLifetime" : "0001-01-01T00:00:00Z",
+              "X_ZYXEL_CurrentTime" : 0,
+              "X_ZYXEL_LinkLocalAddrType" : "",
+              "X_ZYXEL_PreferredLifetime" : 0,
+              "X_ZYXEL_ValidLifetime" : 0
+            }
+          ],
+          "IPv6Enable" : true,
+          "IPv6Origin" : "DelegateFromWan",
+          "IPv6Prefix" : [
+            {
+              "Alias" : "",
+              "Autonomous" : true,
+              "ChildPrefixBits" : "",
+              "Enable" : true,
+              "OnLink" : false,
+              "Origin" : "Child",
+              "ParentPrefix" : "IP.Interface.4.IPv6Prefix.1",
+              "PreferredLifetime" : "0001-01-01T00:00:00Z",
+              "Prefix" : "2a00:11b7:120f:7b00::\/56",
+              "PrefixStatus" : "Invalid",
+              "StaticType" : "Static",
+              "Status" : "Enabled",
+              "ValidLifetime" : "0001-01-01T00:00:00Z",
+              "X_ZYXEL_CurrentTime" : 0,
+              "X_ZYXEL_PreferredLifetime" : 3600,
+              "X_ZYXEL_RouteInfoPrefixes" : "",
+              "X_ZYXEL_ValidLifetime" : 86400
+            }
+          ],
+          "IPv6PrefixDelegateWAN" : "Default",
+          "LowerlayerUp" : "",
+          "MACAddress" : "14:33:75:00:00:01",
+          "Name" : "LAN",
+          "pppConnectionStatus" : "",
+          "rtinfoIntf" : [
+
+          ],
+          "Status" : "Up",
+          "Type" : "Normal",
+          "wanIdx" : 1,
+          "wanpppIdx" : 0,
+          "X_ZYXEL_ConnectionType" : "IP_Routed",
+          "X_ZYXEL_DefaultGatewayIface" : false,
+          "X_ZYXEL_IfName" : "br0",
+          "X_ZYXEL_IPv6LocalAddress" : "fe80::d",
+          "X_ZYXEL_SrvName" : "Default",
+          "X_ZYXEL_Type" : "LAN"
+        },
+        {
+          "BindToIntfGrp" : false,
+          "DefaultGateway" : true,
+          "DHCPLeaseTime" : 0,
+          "DHCPoption42Enable" : false,
+          "DHCPoption42Value" : "",
+          "DHCPStatus" : "Disable",
+          "DHCPtr181Path" : "",
+          "dnsv4Server" : [
+
+          ],
+          "dnsv6Server" : [
+
+          ],
+          "Enable" : true,
+          "Encapsulation" : "PPPoE",
+          "IpIfacePath" : "IP.Interface.2",
+          "ipoeConnectionUpTime" : 0,
+          "IPv4Address" : [
+
+          ],
+          "IPv4Enable" : true,
+          "IPv6Address" : [
+
+          ],
+          "IPv6Enable" : false,
+          "IPv6Origin" : "",
+          "IPv6Prefix" : [
+
+          ],
+          "IPv6PrefixDelegateWAN" : "Default",
+          "LinkType" : "USB",
+          "LowerlayerUp" : "",
+          "MACAddress" : "",
+          "Name" : "WAN",
+          "pppConnectionStatus" : "Unconfigured",
+          "pppoeConnectionUpTime" : 0,
+          "rtinfoIntf" : [
+
+          ],
+          "Status" : "LowerLayerDown",
+          "Type" : "Normal",
+          "wanIdx" : 2,
+          "wanpppIdx" : 1,
+          "X_ZYXEL_ConnectionType" : "IP_Routed",
+          "X_ZYXEL_DefaultGatewayIface" : false,
+          "X_ZYXEL_IfName" : "",
+          "X_ZYXEL_IPv6LocalAddress" : "",
+          "X_ZYXEL_SrvName" : "WWAN",
+          "X_ZYXEL_Type" : "WAN"
+        },
+        {
+          "BindToIntfGrp" : false,
+          "DefaultGateway" : true,
+          "DHCPLeaseTime" : 0,
+          "DHCPoption42Enable" : false,
+          "DHCPoption42Value" : "",
+          "DHCPStatus" : "Disable",
+          "DHCPtr181Path" : "",
+          "dnsv4Server" : [
+
+          ],
+          "dnsv6Server" : [
+
+          ],
+          "Enable" : true,
+          "Encapsulation" : "PPPoE",
+          "IpIfacePath" : "IP.Interface.3",
+          "ipoeConnectionUpTime" : 0,
+          "IPv4Address" : [
+
+          ],
+          "IPv4Enable" : true,
+          "IPv6Address" : [
+
+          ],
+          "IPv6Enable" : true,
+          "IPv6Origin" : "",
+          "IPv6Prefix" : [
+
+          ],
+          "IPv6PrefixDelegateWAN" : "Default",
+          "LinkType" : "ATM",
+          "LowerlayerUp" : "",
+          "MACAddress" : "",
+          "Name" : "WAN",
+          "pppConnectionStatus" : "",
+          "pppoeConnectionUpTime" : 0,
+          "rtinfoIntf" : [
+
+          ],
+          "Type" : "Normal",
+          "wanIdx" : 3,
+          "wanpppIdx" : 2,
+          "X_ZYXEL_ConnectionType" : "IP_Routed",
+          "X_ZYXEL_DefaultGatewayIface" : false,
+          "X_ZYXEL_IfName" : "",
+          "X_ZYXEL_IPv6LocalAddress" : "",
+          "X_ZYXEL_SrvName" : "ADSL",
+          "X_ZYXEL_Type" : "WAN"
+        },
+        {
+          "BindToIntfGrp" : false,
+          "DefaultGateway" : true,
+          "DHCPLeaseTime" : 0,
+          "DHCPoption42Enable" : false,
+          "DHCPoption42Value" : "",
+          "DHCPStatus" : "Disable",
+          "DHCPtr181Path" : "",
+          "dnsv4Server" : [
+            {
+              "Alias" : "",
+              "DNSServer" : "198.51.100.103",
+              "Enable" : true,
+              "Interface" : "IP.Interface.4",
+              "IP_Type" : "",
+              "Status" : "Disabled",
+              "Type" : "IPCP",
+              "v4dns" : "198.51.100.53,198.51.100.54",
+              "X_ZYXEL_DNSSearchList" : "",
+              "X_ZYXEL_GwAddr" : "",
+              "X_ZYXEL_Ifname" : "",
+              "X_ZYXEL_Type" : "IPCP"
+            }
+          ],
+          "dnsv6Server" : [
+
+          ],
+          "Enable" : true,
+          "Encapsulation" : "PPPoE",
+          "IpIfacePath" : "IP.Interface.4",
+          "ipoeConnectionUpTime" : 22365,
+          "IPv4Address" : [
+            {
+              "AddressingType" : "IPCP",
+              "Alias" : "",
+              "Enable" : true,
+              "IPAddress" : "198.51.100.169",
+              "ipIfaceIdx" : 4,
+              "Status" : "Enabled",
+              "SubnetMask" : "255.255.255.255",
+              "X_ZYXEL_Alias" : false,
+              "X_ZYXEL_Dhcp4Subnet_Ref" : "",
+              "X_ZYXEL_IfName" : "ppp2"
+            }
+          ],
+          "IPv4Enable" : true,
+          "IPv6Address" : [
+
+          ],
+          "IPv6Enable" : true,
+          "IPv6Origin" : "",
+          "IPv6Prefix" : [
+            {
+              "Alias" : "",
+              "Autonomous" : false,
+              "ChildPrefixBits" : "",
+              "Enable" : true,
+              "OnLink" : false,
+              "Origin" : "PrefixDelegation",
+              "ParentPrefix" : "",
+              "PreferredLifetime" : "0001-01-01T00:00:00Z",
+              "Prefix" : "2a00:11b7:120f:7b00::\/56",
+              "PrefixStatus" : "Invalid",
+              "StaticType" : "Static",
+              "Status" : "Enabled",
+              "ValidLifetime" : "0001-01-01T00:00:00Z",
+              "X_ZYXEL_CurrentTime" : 0,
+              "X_ZYXEL_PreferredLifetime" : 3600,
+              "X_ZYXEL_RouteInfoPrefixes" : "",
+              "X_ZYXEL_ValidLifetime" : 86400
+            }
+          ],
+          "IPv6PrefixDelegateWAN" : "Default",
+          "LinkType" : "PTM",
+          "LowerlayerUp" : "Up",
+          "MACAddress" : "14:33:75:00:00:02",
+          "Name" : "WAN",
+          "pppConnectionStatus" : "Connected",
+          "pppoeConnectionUpTime" : 22390,
+          "rtinfoIntf" : [
+            {
+              "Interface" : "IP.Interface.4",
+              "PreferredRouteFlag" : "Medium",
+              "Prefix" : "",
+              "RouteLifeTime" : "0001-01-01T00:00:00Z",
+              "SourceRouter" : "fe80::e",
+              "Status" : "ForwardingEntryCreated",
+              "X_ZYXEL_RA_MFlag" : 0,
+              "X_ZYXEL_RA_OFlag" : 0,
+              "X_ZYXEL_RouterLifetime" : 4500,
+              "X_ZYXEL_RouterLifetimeReal" : 1669079865
+            }
+          ],
+          "Status" : "Up",
+          "Type" : "Normal",
+          "v4Gateway" : "198.51.100.27",
+          "v6Gateway" : "198.51.100.109",
+          "wanIdx" : 4,
+          "wanpppIdx" : 3,
+          "X_ZYXEL_ConnectionType" : "IP_Routed",
+          "X_ZYXEL_DefaultGatewayIface" : false,
+          "X_ZYXEL_IfName" : "",
+          "X_ZYXEL_IPv6LocalAddress" : "",
+          "X_ZYXEL_SrvName" : "VDSL",
+          "X_ZYXEL_Type" : "WAN"
+        },
+        {
+          "BindToIntfGrp" : false,
+          "DefaultGateway" : true,
+          "DHCPLeaseTime" : 0,
+          "DHCPoption42Enable" : false,
+          "DHCPoption42Value" : "",
+          "DHCPStatus" : "Disable",
+          "DHCPtr181Path" : "",
+          "dnsv4Server" : [
+
+          ],
+          "dnsv6Server" : [
+
+          ],
+          "Enable" : true,
+          "Encapsulation" : "PPPoE",
+          "IpIfacePath" : "IP.Interface.5",
+          "ipoeConnectionUpTime" : 0,
+          "IPv4Address" : [
+            {
+              "AddressingType" : "DHCP",
+              "Alias" : "",
+              "Enable" : true,
+              "IPAddress" : "",
+              "ipIfaceIdx" : 5,
+              "SubnetMask" : "",
+              "X_ZYXEL_Alias" : false,
+              "X_ZYXEL_Dhcp4Subnet_Ref" : ""
+            }
+          ],
+          "IPv4Enable" : true,
+          "IPv6Address" : [
+
+          ],
+          "IPv6Enable" : true,
+          "IPv6Origin" : "",
+          "IPv6Prefix" : [
+
+          ],
+          "IPv6PrefixDelegateWAN" : "Default",
+          "LinkType" : "ETH",
+          "LowerlayerUp" : "",
+          "MACAddress" : "",
+          "Name" : "WAN",
+          "pppConnectionStatus" : "",
+          "pppoeConnectionUpTime" : 0,
+          "rtinfoIntf" : [
+
+          ],
+          "Type" : "Normal",
+          "wanIdx" : 5,
+          "wanpppIdx" : 6,
+          "X_ZYXEL_ConnectionType" : "IP_Routed",
+          "X_ZYXEL_DefaultGatewayIface" : false,
+          "X_ZYXEL_IfName" : "",
+          "X_ZYXEL_IPv6LocalAddress" : "",
+          "X_ZYXEL_SrvName" : "DATA",
+          "X_ZYXEL_Type" : "WAN"
+        },
+        {
+          "BindToIntfGrp" : false,
+          "DefaultGateway" : true,
+          "DHCPLeaseTime" : 0,
+          "DHCPoption42Enable" : false,
+          "DHCPoption42Value" : "",
+          "DHCPStatus" : "Disable",
+          "DHCPtr181Path" : "",
+          "dnsv4Server" : [
+
+          ],
+          "dnsv6Server" : [
+
+          ],
+          "Enable" : true,
+          "Encapsulation" : "PPPoE",
+          "IpIfacePath" : "IP.Interface.6",
+          "ipoeConnectionUpTime" : 0,
+          "IPv4Address" : [
+
+          ],
+          "IPv4Enable" : true,
+          "IPv6Address" : [
+
+          ],
+          "IPv6Enable" : true,
+          "IPv6Origin" : "",
+          "IPv6Prefix" : [
+
+          ],
+          "IPv6PrefixDelegateWAN" : "Default",
+          "LinkType" : "ETH",
+          "LowerlayerUp" : "",
+          "MACAddress" : "",
+          "Name" : "WAN",
+          "pppConnectionStatus" : "",
+          "pppoeConnectionUpTime" : 0,
+          "rtinfoIntf" : [
+
+          ],
+          "Type" : "Normal",
+          "wanIdx" : 6,
+          "wanpppIdx" : 5,
+          "X_ZYXEL_ConnectionType" : "IP_Routed",
+          "X_ZYXEL_DefaultGatewayIface" : true,
+          "X_ZYXEL_IfName" : "",
+          "X_ZYXEL_IPv6LocalAddress" : "",
+          "X_ZYXEL_SrvName" : "DATA_848",
+          "X_ZYXEL_Type" : "WAN"
+        },
+        {
+          "BindToIntfGrp" : false,
+          "DefaultGateway" : true,
+          "DHCPLeaseTime" : 0,
+          "DHCPoption42Enable" : false,
+          "DHCPoption42Value" : "",
+          "DHCPStatus" : "",
+          "DHCPtr181Path" : "Device.DHCPv4.Client.1",
+          "dnsv4Server" : [
+
+          ],
+          "dnsv6Server" : [
+
+          ],
+          "Enable" : true,
+          "Encapsulation" : "IPoE",
+          "IpIfacePath" : "IP.Interface.7",
+          "ipoeConnectionUpTime" : 0,
+          "IPv4Address" : [
+
+          ],
+          "IPv4Enable" : true,
+          "IPv6Address" : [
+
+          ],
+          "IPv6Enable" : true,
+          "IPv6Origin" : "",
+          "IPv6Prefix" : [
+
+          ],
+          "IPv6PrefixDelegateWAN" : "Default",
+          "LinkType" : "ETH",
+          "LowerlayerUp" : "",
+          "MACAddress" : "",
+          "Name" : "WAN",
+          "pppConnectionStatus" : "",
+          "rtinfoIntf" : [
+
+          ],
+          "Type" : "Normal",
+          "wanIdx" : 7,
+          "wanpppIdx" : 0,
+          "X_ZYXEL_ConnectionType" : "IP_Routed",
+          "X_ZYXEL_DefaultGatewayIface" : false,
+          "X_ZYXEL_IfName" : "nas10_2",
+          "X_ZYXEL_IPv6LocalAddress" : "",
+          "X_ZYXEL_SrvName" : "DATA_IPoE",
+          "X_ZYXEL_Type" : "WAN"
+        }
+      ],
+      "WanRate_RX" : "",
+      "WanRate_TX" : "",
+      "WanType" : "",
+      "WiFiInfo" : [
+        {
+          "AutoChannelEnable" : false,
+          "Channel" : 1,
+          "Enable" : true,
+          "IntfPath" : "WiFi.SSID.1",
+          "MACAddress" : "14:33:75:00:00:07",
+          "ModeEnabled" : "WPA2-Personal",
+          "OperatingChannelBandwidth" : "40MHz",
+          "OperatingFrequencyBand" : "2.4GHz",
+          "OperatingStandards" : "b,g,n",
+          "SSID" : "Net-7",
+          "wifiPassword" : "<redacted>",
+          "WPSEnable" : true,
+          "X_ZYXEL_MainSSID" : true,
+          "X_ZYXEL_Rate" : "144 Mbps"
+        },
+        {
+          "AutoChannelEnable" : false,
+          "Channel" : 1,
+          "Enable" : true,
+          "IntfPath" : "WiFi.SSID.2",
+          "MACAddress" : "14:33:75:00:00:08",
+          "ModeEnabled" : "WPA2-Personal",
+          "OperatingChannelBandwidth" : "40MHz",
+          "OperatingFrequencyBand" : "2.4GHz",
+          "OperatingStandards" : "b,g,n",
+          "SSID" : "Net-48",
+          "wifiPassword" : "<redacted>",
+          "WPSEnable" : true,
+          "X_ZYXEL_MainSSID" : false,
+          "X_ZYXEL_Rate" : "144 Mbps"
+        },
+        {
+          "AutoChannelEnable" : false,
+          "Channel" : 36,
+          "Enable" : true,
+          "IntfPath" : "WiFi.SSID.5",
+          "MACAddress" : "14:33:75:00:00:09",
+          "ModeEnabled" : "WPA2-Personal",
+          "OperatingChannelBandwidth" : "80MHz",
+          "OperatingFrequencyBand" : "5GHz",
+          "OperatingStandards" : "a,n,ac",
+          "SSID" : "Net-22",
+          "wifiPassword" : "<redacted>",
+          "WPSEnable" : true,
+          "X_ZYXEL_MainSSID" : true,
+          "X_ZYXEL_Rate" : "867 Mbps"
+        },
+        {
+          "AutoChannelEnable" : false,
+          "Channel" : 36,
+          "Enable" : false,
+          "IntfPath" : "WiFi.SSID.6",
+          "MACAddress" : "14:33:75:00:00:0A",
+          "ModeEnabled" : "WPA2-Personal",
+          "OperatingChannelBandwidth" : "80MHz",
+          "OperatingFrequencyBand" : "5GHz",
+          "OperatingStandards" : "a,n,ac",
+          "SSID" : "Net-48",
+          "wifiPassword" : "<redacted>",
+          "WPSEnable" : true,
+          "X_ZYXEL_MainSSID" : false,
+          "X_ZYXEL_Rate" : "867 Mbps"
+        }
+      ],
+      "WWANStatsInfo" : {
+        "ConnectionUptime" : "",
+        "FWVersion" : "",
+        "Manufacturer" : "",
+        "Model" : "",
+        "RemainingPIN" : "",
+        "ServiceProvider" : "",
+        "SignalStrength" : "",
+        "SIMIMSI" : "",
+        "Technology" : ""
+      }
+    }
+  ],
+  "ReplyMsg" : "DeviceSource",
+  "ReplyMsgMultiLang" : "",
+  "result" : "ZCFG_SUCCESS"
+}

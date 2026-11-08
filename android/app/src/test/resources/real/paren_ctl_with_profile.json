@@ -1,0 +1,25 @@
+{
+  "Object" : [
+    {
+      "MaxLenPrentalCtlPrf" : 12,
+      "PrentalCtlEnable" : false
+    },
+    {
+      "Days" : "Mon",
+      "Index" : 1,
+      "MACAddressList" : "14:33:75:00:00:0E",
+      "NetworkServiceList" : "",
+      "pcpEnable" : false,
+      "pcpName" : "TEST-media-65202",
+      "ScheduleRuleList" : "X_ZYXEL_Schedule.1",
+      "ServicePolicy" : "Block",
+      "TimeRangeList" : "09:00-10:00",
+      "URLFilter" : "",
+      "UrlPolicy" : "Block",
+      "WebRedirect" : false
+    }
+  ],
+  "ReplyMsg" : "NetworkServiceList",
+  "ReplyMsgMultiLang" : "",
+  "result" : "ZCFG_SUCCESS"
+}
