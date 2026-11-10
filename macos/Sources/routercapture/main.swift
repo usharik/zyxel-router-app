@@ -15,8 +15,7 @@ guard let password = ProcessInfo.processInfo.environment["ROUTER_PASSWORD"], !pa
 let outDir = ProcessInfo.processInfo.environment["CAPTURE_DIR"] ?? "fixtures/real"
 let user = ProcessInfo.processInfo.environment["ROUTER_USER"] ?? "admin"
 
-// Ключи, значения которых чистим; формат сохраняем, секреты — нет.
-let secretKeys: Set<String> = ["wifiPassword", "WEPKey", "WEP64Key1", "WEP64Key2", "WEP64Key3", "WEP64Key4", "WEPKey2", "WEPKey3", "WEPKey4", "AutoGenPSKValue", "PskDisplay", "Input_Passwd", "sessionkey"]
+// Ключи, значения которых чистим, определяет isSensitiveKey: формат сохраняем, секреты и идентификаторы — нет.
 
 func typeName(_ v: Any) -> String {
     switch v {
@@ -32,10 +31,11 @@ func typeName(_ v: Any) -> String {
 // Санитизация: пароли → "<redacted>", MAC → формат сохранён но обезличен, SSID/имена/IP → generic.
 var macSeq = 0
 var macMap: [String: String] = [:]
+var ipv6Map: [String: Int] = [:]
 func sanitize(_ v: Any, key: String = "") -> Any {
     if let d = v as? [String: Any] {
         var out: [String: Any] = [:]
-        for (k, val) in d { out[k] = secretKeys.contains(k) ? "<redacted>" : sanitize(val, key: k) }
+        for (k, val) in d { out[k] = isSensitiveKey(k) ? "<redacted>" : sanitize(val, key: k) }
         return out
     }
     if let a = v as? [Any] { return a.map { sanitize($0, key: key) } }
@@ -47,6 +47,11 @@ func sanitize(_ v: Any, key: String = "") -> Any {
             let sep = s.contains("-") ? "-" : ":"
             let m = ["14", "33", "75", "00", "00", String(format: "%02X", macSeq)].joined(separator: sep)
             macMap[s] = m; return m
+        }
+        // IPv6: публичный префикс выдаёт абонента, а link-local адрес содержит MAC устройства.
+        if let v6 = anonymizedIPv6(s, sequence: ipv6Map[s] ?? ipv6Map.count + 1) {
+            ipv6Map[s] = ipv6Map[s] ?? ipv6Map.count + 1
+            return v6
         }
         if key == "SSID" { return "Net-\(abs(s.hashValue) % 100)" }
         if key.contains("IPAddress") || key == "DNSServer" || key.contains("Gateway") { return s.isEmpty ? s : "198.51.100.\(abs(s.hashValue) % 200 + 1)" }

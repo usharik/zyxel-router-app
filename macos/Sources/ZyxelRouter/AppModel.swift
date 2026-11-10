@@ -66,8 +66,10 @@ final class AppModel: ObservableObject {
 
     // Background refreshes must not wipe the reboot notice while the router is going down.
     private func setBanner(_ text: String?) {
-        if Date() >= rebootNoticeUntil { banner = text }
+        banner = bannerAfterPoll(text, current: banner, rebootNotice: Date() < rebootNoticeUntil, writeError: writeError)
     }
+
+    private var writeError: String?   // ошибка записи держится, пока запись не пройдёт: опрос её не стирает
 
     // Локальная история устройств: роутер забывает отключившиеся устройства, а мы их помним.
     struct KnownDevice: Codable { var mac: String; var name: String; var type: String; var connection: String; var lastSeen: Int }
@@ -84,7 +86,7 @@ final class AppModel: ObservableObject {
         var known = loadKnown()
         let now = Int(Date().timeIntervalSince1970)
         for d in devices where !d.mac.isEmpty {
-            known[d.mac] = KnownDevice(mac: d.mac, name: d.name, type: d.type, connection: d.connection, lastSeen: now)
+            known[d.mac] = KnownDevice(mac: d.mac, name: d.name, type: d.type, connection: d.connection, lastSeen: mergedLastSeen(online: d.online, previous: known[d.mac]?.lastSeen ?? 0, now: now))
         }
         // не копим бесконечно: храним до 200 последних
         let trimmed = Array(known.values.sorted { $0.lastSeen > $1.lastSeen }.prefix(200))
@@ -156,6 +158,7 @@ final class AppModel: ObservableObject {
         // Сбрасываем данные другого роутера, чтобы после перелогина не мелькали чужие профили/маршруты.
         parental = nil
         routing = nil
+        log = nil
         editorOpen = false
         error = failure.localizedDescription
         phase = .login
@@ -230,22 +233,53 @@ final class AppModel: ObservableObject {
         catch { setBanner(error.localizedDescription) }
     }
 
+    /// Запись с восстановлением сессии: опрос (только чтение) об устаревшем CSRF-токене не узнает.
+    private func recovering<T>(_ c: RouterClient, retry: Bool = true, _ block: () async throws -> T) async throws -> T {
+        let (user, pass) = (username, password)
+        let result = try await withSessionRecovery(retry: retry, relogin: {
+            guard !pass.isEmpty else { throw RouterError.sessionExpired }
+            try await c.login(username: user, password: pass)
+        }, block)
+        writeError = nil
+        return result
+    }
+
+    /// Отказ в повторном входе нельзя глушить баннером: дальнейшие попытки могут заблокировать вход на роутере.
+    private func sessionLost(_ error: Error) -> Bool {
+        switch error {
+        case RouterError.invalidCredentials, RouterError.locked: handleLoginFailure(error); return true
+        default: return false
+        }
+    }
+
+    /// Ошибка записи: показываем её и молча перечитываем состояние (loadParental стёр бы баннер).
+    private func writeFailed(_ error: Error, _ c: RouterClient) async {
+        if sessionLost(error) { return }
+        writeError = error.localizedDescription
+        banner = writeError
+        if let fresh = try? await c.parentalControl() { parental = fresh }
+    }
+
     func setParentalEnabled(_ on: Bool) async {
         guard let client else { return }
         do {
-            try await client.setParentalEnabled(on)
-            parental = try await client.parentalControl()
+            parental = try await recovering(client) {
+                try await client.setParentalEnabled(on)
+                return try await client.parentalControl()
+            }
             banner = nil
-        } catch { banner = error.localizedDescription; await loadParental() }
+        } catch { await writeFailed(error, client) }
     }
 
     func setProfileEnabled(index: Int, on: Bool) async {
         guard let client else { return }
         do {
-            try await client.setProfileEnabled(index: index, on: on)
-            parental = try await client.parentalControl()
+            parental = try await recovering(client) {
+                try await client.setProfileEnabled(index: index, on: on)
+                return try await client.parentalControl()
+            }
             banner = nil
-        } catch { banner = error.localizedDescription; await loadParental() }
+        } catch { await writeFailed(error, client) }
     }
 
     func openNewProfile() {
@@ -311,8 +345,13 @@ final class AppModel: ObservableObject {
         editSaving = true
         defer { editSaving = false }
         do {
-            try await client.saveProfile(index: editorIndex, name: name, macs: Array(editMacs), days: days, timeRangeList: timeRangeList, enabled: editEnabled)
+            // Создание не повторяем автоматически: при 504 профиль мог уже создаться, и повтор сделал бы дубль.
+            let (index, macs, enabled) = (editorIndex, Array(editMacs), editEnabled)
+            try await recovering(client, retry: index != nil) {
+                try await client.saveProfile(index: index, name: name, macs: macs, days: days, timeRangeList: timeRangeList, enabled: enabled)
+            }
         } catch {
+            if sessionLost(error) { return }
             editError = error.localizedDescription   // запись не прошла — редактор открыт, можно повторить
             return
         }
@@ -325,20 +364,24 @@ final class AppModel: ObservableObject {
     func deleteProfile(index: Int) async {
         guard let client else { return }
         do {
-            try await client.deleteProfile(index: index)
-            parental = try await client.parentalControl()
+            parental = try await recovering(client) {
+                try await client.deleteProfile(index: index)
+                return try await client.parentalControl()
+            }
             banner = nil
-        } catch { banner = error.localizedDescription }
+        } catch { await writeFailed(error, client) }
     }
 
     func reboot() async {
         guard let client else { return }
         do {
-            try await client.reboot()
+            try await recovering(client, retry: false) { try await client.reboot() }
             banner = "Роутер перезагружается. Интернет вернётся через несколько минут."
             rebootNoticeUntil = Date().addingTimeInterval(180)
         } catch {
-            banner = error.localizedDescription
+            if sessionLost(error) { return }
+            writeError = error.localizedDescription
+            banner = writeError
         }
     }
 
@@ -351,6 +394,7 @@ final class AppModel: ObservableObject {
         snapshot = nil
         parental = nil
         routing = nil
+        log = nil
         editorOpen = false
         phase = .login
     }

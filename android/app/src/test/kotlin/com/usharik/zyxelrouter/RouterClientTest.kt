@@ -198,7 +198,25 @@ class RealFixtureTest {
         assertTrue(s.wanIP.isNotEmpty())
         assertTrue("устройства разобраны", s.devices.size > 5)
         assertTrue(s.wifi.any { it.band == "5 ГГц" } && s.wifi.any { it.band == "2,4 ГГц" })
-        assertFalse("пароль не утёк", s.schema.contains("<redacted>").let { false })
+        assertFalse("значения не попадают в диагностику", s.schema.contains("198.51.100") || s.schema.contains("14:33:75"))
+    }
+
+    @Test fun fixturesHoldNoPersonalData() {
+        val sensitive = Regex("serial|passw|passphrase|psk|ploam|provisioningkey|wepkey|firstusedate|loginbanner|^location$|^domainname$", RegexOption.IGNORE_CASE)
+        val publicIpv6 = Regex("^(?!fe80|2001:db8|::)[0-9a-f]{1,4}:[0-9a-f:]*(/\\d+)?$", RegexOption.IGNORE_CASE)
+        val leaks = mutableListOf<String>()
+        fun walk(v: Any?, key: String) {
+            when (v) {
+                is JSONObject -> v.keys().forEach { walk(v.get(it), it) }
+                is JSONArray -> (0 until v.length()).forEach { walk(v.get(it), key) }
+                is String -> if (v.isNotEmpty() && v != "<redacted>") {
+                    if (sensitive.containsMatchIn(key)) leaks += key
+                    if (v.count { it == ':' } != 5 && publicIpv6.matches(v)) leaks += key
+                }
+            }
+        }
+        listOf("cardpage_status", "lanhosts", "paren_ctl_with_profile").forEach { name -> load(name)?.let { walk(it, "") } }
+        assertEquals("в фикстурах остались личные данные", emptyList<String>(), leaks)
     }
 
     @Test fun realParentalFormat() {

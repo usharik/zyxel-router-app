@@ -437,3 +437,51 @@ public func parseSnapshot(status: [String: Any], hosts: [String: Any]) -> Router
         internetUptime: Field.int(wan?[pppoe ? "pppoeConnectionUpTime" : "ipoeConnectionUpTime"]),
         downKbps: Field.int(dsl?["DownstreamCurrRate"]), upKbps: Field.int(dsl?["UpstreamCurrRate"]), devices: devices, wifi: wifi, schema: schema)
 }
+
+// MARK: - Общая логика записи и обезличивания
+
+/// Значения этих ключей не должны попадать в фикстуры: они идентифицируют устройство или владельца.
+public func isSensitiveKey(_ key: String) -> Bool {
+    if ["Location", "DomainName", "v4dns", "sessionkey"].contains(key) { return true }
+    return key.range(of: "serial|passw|passphrase|psk|ploam|provisioningkey|wep(64)?key|firstusedate|loginbanner", options: [.regularExpression, .caseInsensitive]) != nil
+}
+
+/// Обезличивает IPv6-адрес, сохраняя вид (link-local или глобальный) и длину префикса; для прочих строк возвращает nil.
+public func anonymizedIPv6(_ value: String, sequence: Int) -> String? {
+    guard value.filter({ $0 == ":" }).count >= 2,
+          value.range(of: "^[0-9A-Fa-f:]+(/[0-9]+)?$", options: .regularExpression) != nil,
+          value.range(of: "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", options: .regularExpression) == nil else { return nil }
+    let suffix = value.firstIndex(of: "/").map { String(value[$0...]) } ?? ""
+    let hex = String(sequence, radix: 16)
+    return (value.lowercased().hasPrefix("fe80") ? "fe80::\(hex)" : "2001:db8:\(hex)::") + suffix
+}
+
+/// Роутер отдаёт Days строкой "Mon,Tue", а на запись подтверждённо принимает массив.
+public func daysAsArray(_ obj: [String: Any]) -> [String: Any] {
+    guard let days = obj["Days"] as? String else { return obj }
+    var out = obj
+    out["Days"] = days.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    return out
+}
+
+/// Устройство, которое роутер ещё перечисляет как неактивное, не должно считаться «виденным только что».
+public func mergedLastSeen(online: Bool, previous: Int, now: Int) -> Int { online ? now : previous }
+
+/// Выполняет запись, восстанавливая сессию при устаревшем CSRF-токене. `retry` = false — для неидемпотентных
+/// действий: HTTP 504 не гарантирует, что запись не применилась, поэтому пользователь повторяет её сам.
+public func withSessionRecovery<T>(retry: Bool, relogin: () async throws -> Void, _ block: () async throws -> T) async throws -> T {
+    do {
+        return try await block()
+    } catch RouterError.sessionExpired {
+        try await relogin()
+        guard retry else { throw RouterError.failed("Сессия обновлена. Повторите действие.") }
+        return try await block()
+    }
+}
+
+/// Баннер после фонового обновления: уведомление о перезагрузке и ошибку записи опрос не стирает.
+public func bannerAfterPoll(_ text: String?, current: String?, rebootNotice: Bool, writeError: String?) -> String? {
+    if rebootNotice { return current }
+    if text == nil, let current, current == writeError { return current }
+    return text
+}

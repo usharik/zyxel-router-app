@@ -100,6 +100,8 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
         const obj = body && session.aes && JSON.parse(body).content ? JSON.parse(aesDec(JSON.parse(body).content, session.aes, JSON.parse(body).iv)) : (body ? JSON.parse(body) : {});
         if (oidGet === 'paren_ctl') {
           if (req.method === 'PUT' && 'PrentalCtlEnable' in obj && !('pcpName' in obj)) parental.Object[0].PrentalCtlEnable = obj.PrentalCtlEnable === '1' || obj.PrentalCtlEnable === 1 || obj.PrentalCtlEnable === true;
+          // Формат записи, подтверждённый на роутере, — массив; строку отвергаем, чтобы тесты ловили регрессию.
+          else if (req.method === 'PUT' && 'Index' in obj && typeof obj.Days === 'string') return send(200, aesEnc(JSON.stringify({ result: 'ZCFG_INVALID_PARAM_VALUE' }), session.aes));
           else if (req.method === 'PUT' && 'Index' in obj) { const p = parental.Object.find(x => x.Index === obj.Index); if (p) Object.assign(p, norm(obj)); }
           else if (req.method === 'POST') { const idx = Math.max(0, ...parental.Object.slice(1).map(x => x.Index)) + 1; parental.Object.push({ ...norm(obj), Index: idx }); }
           else if (req.method === 'DELETE') { const i = parental.Object.findIndex(x => x.Index === qIndex); if (i > 0) parental.Object.splice(i, 1); }

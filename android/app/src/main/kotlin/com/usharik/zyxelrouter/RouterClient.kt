@@ -349,12 +349,22 @@ internal fun parseSnapshot(status: JSONObject, hosts: JSONObject): RouterSnapsho
     )
 }
 
+/** Роутер отдаёт Days строкой "Mon,Tue", а на запись подтверждённо принимает массив. */
+internal fun daysAsArray(obj: JSONObject): JSONObject {
+    val days = obj.opt("Days") as? String ?: return obj
+    return obj.put("Days", JSONArray(days.split(",").map { it.trim() }.filter { it.isNotEmpty() }))
+}
+
 /** Blocking client for the router's web API; call from a background dispatcher. */
 class RouterClient(address: String) {
     private val base: String
     private val cookies = linkedMapOf<String, String>()
     private var aesKey: String? = null
     private var csrf: String? = null
+
+    /** Растёт при каждом входе: параллельные восстановления сессии не должны входить повторно. */
+    @Volatile var sessionGeneration = 0
+        private set
 
     init {
         val trimmed = address.trim()
@@ -404,7 +414,8 @@ class RouterClient(address: String) {
         } catch (e: RouterException) {
             throw e
         } catch (e: Exception) {
-            throw RouterException.Failed("Роутер недоступен: ${e.message}")
+            // Текст исключения (адрес, внутренности HTTP-клиента) пользователю ничего не скажет.
+            throw RouterException.Failed("Роутер недоступен. Проверьте подключение к его сети.")
         }
     }
 
@@ -413,7 +424,26 @@ class RouterClient(address: String) {
         return RouterBasic(str(d?.opt("ModelName")), str(d?.opt("SoftwareVersion")), str(d?.opt("CurrentLanguage")))
     }
 
+    // Весь вход под тем же монитором, что и send: иначе параллельный запрос застанет сессию наполовину сброшенной.
+    @Synchronized
     fun login(username: String, password: String) {
+        try {
+            performLogin(username, password)
+            sessionGeneration++
+        } catch (e: RouterException) {
+            throw e
+        } catch (e: Exception) {
+            throw RouterException.Failed("Не удалось войти: роутер вернул некорректные данные.")   // битый RSA-ключ и т. п.
+        }
+    }
+
+    /** Повторный вход, если с момента [generation] сессию ещё никто не восстановил. */
+    @Synchronized
+    fun reloginIfUnchanged(generation: Int, username: String, password: String) {
+        if (generation == sessionGeneration) login(username, password)
+    }
+
+    private fun performLogin(username: String, password: String) {
         val basic = basicInfo()
         val pem = str(send("GET", "/getRSAPublickKey", timeoutMs = 15_000).json?.opt("RSAPublicKey"))
         val payload = JSONObject()
@@ -495,7 +525,7 @@ class RouterClient(address: String) {
         val obj = dalObjects("paren_ctl").firstOrNull { long(it.opt("Index")).toInt() == index }
             ?: throw RouterException.Failed("Профиль не найден; обновите список.")
         obj.put("pcpEnable", if (on) 1 else 0)
-        dalWrite("PUT", "paren_ctl", obj)
+        dalWrite("PUT", "paren_ctl", daysAsArray(obj))
     }
 
     /** Создаёт (index == null) или изменяет профиль. MAC с двоеточиями, дни кодами Mon..Sun,

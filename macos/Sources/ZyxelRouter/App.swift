@@ -263,7 +263,7 @@ struct DeviceDetailView: View {
             }
             .formStyle(.grouped)
             HStack {
-                if !d.online { Button("Забыть", role: .destructive) { model.forgetDevice(d.mac); onClose() } }
+                if !d.online && !(model.snapshot?.devices.contains { $0.mac == d.mac } ?? false) { Button("Забыть", role: .destructive) { model.forgetDevice(d.mac); onClose() } }
                 Spacer()
                 Button("Закрыть", action: onClose).keyboardShortcut(.defaultAction)
             }

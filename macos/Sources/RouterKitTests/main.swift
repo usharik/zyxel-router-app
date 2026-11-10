@@ -120,7 +120,7 @@ if let card = loadFixture("cardpage_status"), let lan = loadFixture("lanhosts") 
     check(!real.wanIP.isEmpty, "реальный снимок: есть внешний IP")
     check(real.devices.count > 5, "реальный снимок: устройства разобраны (\(real.devices.count))")
     check(real.wifi.contains { $0.band == "5 ГГц" } && real.wifi.contains { $0.band == "2,4 ГГц" }, "реальный снимок: обе полосы Wi-Fi")
-    check(!real.schema.contains("<redacted>") || true, "диагностика не падает на реальных данных")
+    check(!real.schema.contains("198.51.100") && !real.schema.contains("14:33:75"), "диагностика: значения реальных данных не попадают")
     // Устройство с Layer1Interface "WiFi.SSID.2" (без префикса) должно считаться гостевым.
     print("info - устройств в реальной фикстуре: \(real.devices.count), гостевых: \(real.devices.filter(\.guest).count)")
 } else {
@@ -212,6 +212,69 @@ eq(off.lastSeen, 123, "офлайн: lastSeen")
 let offWifi = RouterDevice.offline(mac: "AA:BB:CC:DD:EE:02", name: "", type: "", connection: "Wi-Fi 5GHz", lastSeen: 0)
 eq(offWifi.name, "AA:BB:CC:DD:EE:02", "офлайн: имя из MAC если пусто")
 eq(offWifi.network, "Wi-Fi", "офлайн: Wi-Fi сеть")
+
+// MARK: Обезличивание
+for k in ["SerialNumber", "X_ZYXEL_Ploam_Password", "X_ZYXEL_ProvisioningKey", "wifiPassword", "WEP64Key1", "WEPKey", "PskDisplay", "AutoGenPSKValue", "Input_Passwd", "sessionkey", "FirstUseDate", "X_ZYXEL_LoginBanner", "Location", "DomainName", "v4dns"] {
+    check(isSensitiveKey(k), "обезличивание: \(k) скрывается")
+}
+for k in ["ModelName", "SoftwareVersion", "VendorClassID", "Days", "Enable", "IPAddress"] {
+    check(!isSensitiveKey(k), "обезличивание: \(k) сохраняется")
+}
+eq(anonymizedIPv6("2a02:768:1:2::/64", sequence: 3), "2001:db8:3::/64", "IPv6: публичный префикс")
+eq(anonymizedIPv6("fe80::1234:56ff:fe78:9abc", sequence: 10), "fe80::a", "IPv6: link-local")
+check(anonymizedIPv6("14:33:75:00:00:01", sequence: 1) == nil, "IPv6: MAC не трогаем")
+check(anonymizedIPv6("21:00-23:59", sequence: 1) == nil, "IPv6: интервал времени не трогаем")
+check(anonymizedIPv6("21:00", sequence: 1) == nil, "IPv6: время не трогаем")
+check(anonymizedIPv6("Device.IP.Interface.1", sequence: 1) == nil, "IPv6: путь TR-181 не трогаем")
+
+func leakedKeys(_ v: Any, key: String = "") -> [String] {
+    if let d = v as? [String: Any] { return d.flatMap { leakedKeys($0.value, key: $0.key) } }
+    if let a = v as? [Any] { return a.flatMap { leakedKeys($0, key: key) } }
+    if let s = v as? String, !s.isEmpty, s != "<redacted>", isSensitiveKey(key), !(key == "v4dns" && s.hasPrefix("198.51.100.")) { return [key] }
+    return []
+}
+for name in ["cardpage_status", "lanhosts", "paren_ctl_with_profile"] {
+    if let f = loadFixture(name) { eq(leakedKeys(f), [], "фикстура \(name) без личных данных") }
+}
+
+// MARK: Запись
+let strDays = daysAsArray(["Days": "Mon, Tue,,Fri", "x": 1])
+eq(strDays["Days"] as? [String] ?? [], ["Mon", "Tue", "Fri"], "Days: строка становится массивом")
+eq(daysAsArray(["Days": ["Sat"]])["Days"] as? [String] ?? [], ["Sat"], "Days: массив не меняется")
+check(daysAsArray(["x": 1])["Days"] == nil, "Days: отсутствие не добавляет поле")
+eq(mergedLastSeen(online: true, previous: 100, now: 500), 500, "lastSeen: онлайн обновляется")
+eq(mergedLastSeen(online: false, previous: 100, now: 500), 100, "lastSeen: неактивное сохраняет прежнее")
+
+eq(bannerAfterPoll(nil, current: "связь", rebootNotice: false, writeError: nil), nil, "баннер: успешный опрос убирает ошибку связи")
+eq(bannerAfterPoll(nil, current: "запись", rebootNotice: false, writeError: "запись"), "запись", "баннер: опрос не стирает ошибку записи")
+eq(bannerAfterPoll("связь", current: "запись", rebootNotice: false, writeError: "запись"), "связь", "баннер: новая ошибка связи видна")
+eq(bannerAfterPoll(nil, current: "ребут", rebootNotice: true, writeError: nil), "ребут", "баннер: перезагрузка не стирается")
+
+var calls = 0, relogins = 0
+let recovered = try await withSessionRecovery(retry: true, relogin: { relogins += 1 }) { () async throws -> String in
+    calls += 1
+    if calls == 1 { throw RouterError.sessionExpired }
+    return "ok"
+}
+check(recovered == "ok" && calls == 2 && relogins == 1, "восстановление: повтор после входа")
+
+calls = 0; relogins = 0
+do {
+    try await withSessionRecovery(retry: false, relogin: { relogins += 1 }) { calls += 1; throw RouterError.sessionExpired }
+    check(false, "восстановление: без повтора должно бросить")
+} catch { check(calls == 1 && relogins == 1 && error.localizedDescription.contains("Повторите"), "восстановление: неидемпотентное не повторяется") }
+
+calls = 0
+do {
+    try await withSessionRecovery(retry: true, relogin: { throw RouterError.invalidCredentials }) { calls += 1; throw RouterError.sessionExpired }
+    check(false, "восстановление: отказ должен дойти")
+} catch { check(error as? RouterError == .invalidCredentials && calls == 1, "восстановление: отказ во входе не повторяет запись") }
+
+calls = 0; relogins = 0
+do {
+    try await withSessionRecovery(retry: true, relogin: { relogins += 1 }) { calls += 1; throw RouterError.failed("x") }
+    check(false, "восстановление: ошибка должна дойти")
+} catch { check(relogins == 0 && calls == 1, "восстановление: прочие ошибки без повторного входа") }
 
 print("\n==== \(failures == 0 ? "ВСЕ ТЕСТЫ ПРОЙДЕНЫ" : "ПРОВАЛЕНО: \(failures)") ====")
 exit(failures == 0 ? 0 : 1)

@@ -212,7 +212,7 @@ public actor RouterClient {
             throw RouterError.failed("Профиль не найден; обновите список.")
         }
         obj["pcpEnable"] = on ? 1 : 0
-        try await dalWrite("PUT", oid: "paren_ctl", obj: obj)
+        try await dalWrite("PUT", oid: "paren_ctl", obj: daysAsArray(obj))
     }
 
     /// Создаёт (index == nil) или изменяет профиль. MAC-адреса с двоеточиями, дни кодами Mon..Sun,

@@ -14,6 +14,13 @@ import kotlinx.coroutines.withContext
 
 enum class Phase { STARTING, LOGIN, MAIN }
 
+sealed interface SaveState {
+    data object Idle : SaveState
+    data object InFlight : SaveState
+    data object Done : SaveState
+    data class Failed(val message: String) : SaveState
+}
+
 data class UiState(
     val phase: Phase = Phase.STARTING,
     val address: String = "192.168.1.1",
@@ -30,6 +37,8 @@ data class UiState(
     val routing: Routing? = null,
     val log: List<LogEntry>? = null,
     val sectionBusy: Boolean = false,
+    val refreshing: Boolean = false,   // обновление по кнопке; фоновый опрос индикатор не показывает
+    val saveState: SaveState = SaveState.Idle,
 )
 
 class RouterViewModel(app: Application) : AndroidViewModel(app) {
@@ -39,9 +48,30 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
     private var pollJob: Job? = null
     private var foreground = false
     private var rebootNoticeUntil = 0L
+    private var parentalWrites = 0   // только с главного потока
+    private var writeError: String? = null   // текст ошибки записи; держится, пока запись не пройдёт или баннер не закроют
+
+    /** Действие с записью; при устаревшем токене входит заново. */
+    private suspend fun <T> recovering(c: RouterClient, retry: Boolean = true, block: () -> T): T {
+        val s = state.value
+        return withContext(Dispatchers.IO) {
+            val generation = c.sessionGeneration
+            withSessionRecovery(retry, {
+                if (s.password.isEmpty()) throw RouterException.SessionExpired
+                c.reloginIfUnchanged(generation, s.username, s.password)
+            }, block)
+        }
+    }
+
+    /** Отказ в повторном входе нельзя глушить баннером: дальнейшие попытки могут заблокировать вход на роутере. */
+    private fun sessionLost(e: RouterException): Boolean {
+        if (e !is RouterException.InvalidCredentials && e !is RouterException.Locked) return false
+        loginFailed(e)
+        return true
+    }
 
     // Background refreshes must not wipe the reboot notice while the router is going down.
-    private fun bannerAfterRefresh(text: String?, current: String?) = if (System.currentTimeMillis() >= rebootNoticeUntil) text else current
+    private fun bannerAfterRefresh(text: String?, current: String?) = bannerAfterPoll(text, current, System.currentTimeMillis() < rebootNoticeUntil, writeError)
 
     // Локальная история устройств: роутер забывает отключившиеся устройства, а мы их помним.
     private val devPrefs = app.getSharedPreferences("devices", android.content.Context.MODE_PRIVATE)
@@ -61,7 +91,8 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
         val known = loadKnown()
         val now = System.currentTimeMillis() / 1000
         for (d in devices) if (d.mac.isNotEmpty()) {
-            known[d.mac] = org.json.JSONObject().put("mac", d.mac).put("name", d.name).put("type", d.type).put("connection", d.connection).put("lastSeen", now)
+            known[d.mac] = org.json.JSONObject().put("mac", d.mac).put("name", d.name).put("type", d.type).put("connection", d.connection)
+                .put("lastSeen", mergedLastSeen(d.online, known[d.mac]?.optLong("lastSeen") ?: 0, now))
         }
         val trimmed = known.values.sortedByDescending { it.optLong("lastSeen") }.take(200)
         devPrefs.edit().putString(knownKey(), org.json.JSONArray(trimmed).toString()).apply()
@@ -70,9 +101,11 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
     /** Устройства для показа: живые из роутера плюс известные ранее, которых сейчас нет (как офлайн). */
     fun displayDevices(): List<RouterDevice> {
         historyRev  // чтение, чтобы Compose пересобирал после forgetDevice
-        val live = state.value.snapshot?.devices ?: emptyList()
+        val known = loadKnown()
+        // Роутер ещё перечисляет недавно отключившиеся устройства; время берём из нашей истории.
+        val live = (state.value.snapshot?.devices ?: emptyList()).map { d -> if (d.online) d else d.copy(lastSeen = known[d.mac]?.optLong("lastSeen") ?: 0) }
         val liveMacs = live.map { it.mac }.toSet()
-        val offline = loadKnown().values.filter { it.optString("mac") !in liveMacs }
+        val offline = known.values.filter { it.optString("mac") !in liveMacs }
             .map { offlineDevice(it.optString("mac"), it.optString("name"), it.optString("type"), it.optString("connection"), it.optLong("lastSeen")) }
             .sortedBy { it.name.lowercase() }
         return live + offline
@@ -147,7 +180,7 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
         pollJob?.cancel()
         client = null
         // Сбрасываем данные другого роутера, чтобы после перелогина не мелькали чужие профили/маршруты.
-        state.update { it.copy(phase = Phase.LOGIN, snapshot = null, parental = null, routing = null, error = e.message, busy = false) }
+        state.update { it.copy(phase = Phase.LOGIN, snapshot = null, parental = null, routing = null, log = null, error = e.message, busy = false) }
     }
 
     fun setForeground(value: Boolean) {
@@ -166,27 +199,34 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun refreshNow() { viewModelScope.launch { refresh() } }
+    fun refreshNow() {
+        if (state.value.refreshing) return
+        viewModelScope.launch {
+            state.update { it.copy(refreshing = true) }
+            try { refresh() } finally { state.update { it.copy(refreshing = false) } }
+        }
+    }
 
     private suspend fun refresh() {
         val c = client ?: return
+        val generation = c.sessionGeneration
         try {
             val snapshot = withContext(Dispatchers.IO) { c.snapshot() }
             state.update { it.copy(snapshot = snapshot, updatedAt = System.currentTimeMillis(), banner = bannerAfterRefresh(null, it.banner)) }
             recordDevices(snapshot.devices)
         } catch (_: RouterException.SessionExpired) {
-            relogin(c)
+            relogin(c, generation)
         } catch (e: RouterException) {
             state.update { it.copy(banner = bannerAfterRefresh(e.message, it.banner)) }
         }
     }
 
-    private suspend fun relogin(c: RouterClient) {
+    private suspend fun relogin(c: RouterClient, generation: Int) {
         val s = state.value
         if (s.password.isEmpty()) return loginFailed(RouterException.SessionExpired)
         try {
             val snapshot = withContext(Dispatchers.IO) {
-                c.login(s.username, s.password)
+                c.reloginIfUnchanged(generation, s.username, s.password)
                 c.snapshot()
             }
             state.update { it.copy(snapshot = snapshot, updatedAt = System.currentTimeMillis(), banner = bannerAfterRefresh(null, it.banner)) }
@@ -200,15 +240,16 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun loadParental() {
+    fun loadParental(keepBanner: Boolean = false) {
         val c = client ?: return
+        if (parentalWrites > 0) return   // запись сама перечитает состояние; ранний ответ сбросил бы переключатель
         viewModelScope.launch {
             state.update { it.copy(sectionBusy = true) }
             try {
                 val pc = withContext(Dispatchers.IO) { c.parentalControl() }
-                state.update { it.copy(parental = pc, sectionBusy = false, banner = null) }
+                state.update { it.copy(parental = if (parentalWrites == 0) pc else it.parental, sectionBusy = false, banner = if (keepBanner) it.banner else bannerAfterRefresh(null, it.banner)) }
             } catch (e: RouterException) {
-                state.update { it.copy(sectionBusy = false, banner = e.message) }
+                state.update { it.copy(sectionBusy = false, banner = bannerAfterRefresh(e.message, it.banner)) }
             }
         }
     }
@@ -219,9 +260,9 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
             state.update { it.copy(sectionBusy = true) }
             try {
                 val r = withContext(Dispatchers.IO) { c.routing() }
-                state.update { it.copy(routing = r, sectionBusy = false, banner = null) }
+                state.update { it.copy(routing = r, sectionBusy = false, banner = bannerAfterRefresh(null, it.banner)) }
             } catch (e: RouterException) {
-                state.update { it.copy(sectionBusy = false, banner = e.message) }
+                state.update { it.copy(sectionBusy = false, banner = bannerAfterRefresh(e.message, it.banner)) }
             }
         }
     }
@@ -232,66 +273,81 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
             state.update { it.copy(sectionBusy = true) }
             try {
                 val l = withContext(Dispatchers.IO) { c.systemLog() }
-                state.update { it.copy(log = l, sectionBusy = false, banner = null) }
+                state.update { it.copy(log = l, sectionBusy = false, banner = bannerAfterRefresh(null, it.banner)) }
             } catch (e: RouterException) {
-                state.update { it.copy(sectionBusy = false, banner = e.message) }
+                state.update { it.copy(sectionBusy = false, banner = bannerAfterRefresh(e.message, it.banner)) }
             }
         }
     }
 
-    fun setParentalEnabled(on: Boolean) {
+    /**
+     * Запись родительского контроля с мгновенным откликом. Откатывается только изменённое поле, а ответ роутера
+     * применяется после последней из параллельных записей, чтобы соседние переключатели не прыгали.
+     */
+    private fun writeParental(optimistic: (ParentalControl) -> ParentalControl, rollback: (ParentalControl) -> ParentalControl, op: (RouterClient) -> Unit) {
         val c = client ?: return
+        state.update { it.copy(parental = it.parental?.let(optimistic)) }
+        parentalWrites++
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { c.setParentalEnabled(on); c.parentalControl() }.let { pc -> state.update { it.copy(parental = pc, banner = null) } }
+                val pc = recovering(c) { op(c); c.parentalControl() }
+                parentalWrites--
+                writeError = null
+                if (parentalWrites == 0) state.update { it.copy(parental = pc, banner = bannerAfterRefresh(null, it.banner)) }
             } catch (e: RouterException) {
-                state.update { it.copy(banner = e.message) }
-                loadParental()
+                parentalWrites--
+                if (sessionLost(e)) return@launch
+                writeError = e.message
+                state.update { it.copy(parental = it.parental?.let(rollback), banner = e.message) }
+                loadParental(keepBanner = true)
             }
         }
     }
 
-    fun setProfileEnabled(index: Int, on: Boolean) {
-        val c = client ?: return
-        viewModelScope.launch {
-            try {
-                withContext(Dispatchers.IO) { c.setProfileEnabled(index, on); c.parentalControl() }.let { pc -> state.update { it.copy(parental = pc, banner = null) } }
-            } catch (e: RouterException) {
-                state.update { it.copy(banner = e.message) }
-                loadParental()
-            }
-        }
-    }
+    fun setParentalEnabled(on: Boolean) = writeParental({ it.copy(enabled = on) }, { it.copy(enabled = !on) }) { it.setParentalEnabled(on) }
 
-    fun saveProfile(index: Int?, name: String, macs: List<String>, days: List<String>, timeRangeList: String, enabled: Boolean, onSaved: () -> Unit, onError: (String) -> Unit) {
-        val c = client ?: return onError("Сессия потеряна, войдите снова.")   // иначе диалог завис бы с disabled-кнопкой
+    fun setProfileEnabled(index: Int, on: Boolean) =
+        writeParental({ it.withProfileEnabled(index, on) }, { it.withProfileEnabled(index, !on) }) { it.setProfileEnabled(index, on) }
+
+    /** Результат хранится здесь, а не в колбэках диалога: иначе после поворота экрана ответ уйдёт в уничтоженный экран. */
+    fun saveProfile(index: Int?, name: String, macs: List<String>, days: List<String>, timeRangeList: String, enabled: Boolean) {
+        if (state.value.saveState == SaveState.InFlight) return
+        val c = client ?: return state.update { it.copy(saveState = SaveState.Failed("Сессия потеряна, войдите снова.")) }
+        state.update { it.copy(saveState = SaveState.InFlight) }
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { c.saveProfile(index, name, macs, days, timeRangeList, enabled) }
+                // Создание не повторяем автоматически: при 504 профиль мог уже создаться, и повтор сделал бы дубль.
+                recovering(c, retry = index != null) { c.saveProfile(index, name, macs, days, timeRangeList, enabled) }
             } catch (e: RouterException) {
-                onError(e.message ?: "Ошибка")   // запись не прошла — диалог открыт, можно повторить
+                if (!sessionLost(e)) state.update { it.copy(saveState = SaveState.Failed(e.message ?: "Ошибка")) }   // диалог открыт, можно повторить
                 return@launch
             }
             // Запись прошла. Ошибку перечитывания не показываем в диалоге, иначе повтор создаст дубль.
-            onSaved()
+            writeError = null
+            state.update { it.copy(saveState = SaveState.Done) }
             try {
                 val pc = withContext(Dispatchers.IO) { c.parentalControl() }
-                state.update { it.copy(parental = pc, banner = null) }
+                state.update { it.copy(parental = pc, banner = bannerAfterRefresh(null, it.banner)) }
             } catch (e: RouterException) {
                 state.update { it.copy(banner = e.message) }
             }
         }
     }
+
+    fun resetSaveState() = state.update { it.copy(saveState = SaveState.Idle) }
 
     fun deleteProfile(index: Int) {
         val c = client ?: return
         viewModelScope.launch {
             try {
-                val pc = withContext(Dispatchers.IO) { c.deleteProfile(index); c.parentalControl() }
-                state.update { it.copy(parental = pc, banner = null) }
+                val pc = recovering(c) { c.deleteProfile(index); c.parentalControl() }
+                writeError = null
+                state.update { it.copy(parental = pc, banner = bannerAfterRefresh(null, it.banner)) }
             } catch (e: RouterException) {
+                if (sessionLost(e)) return@launch
+                writeError = e.message
                 state.update { it.copy(banner = e.message) }
-                loadParental()
+                loadParental(keepBanner = true)
             }
         }
     }
@@ -300,10 +356,12 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
         val c = client ?: return
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { c.reboot() }
+                recovering(c, retry = false) { c.reboot() }
                 rebootNoticeUntil = System.currentTimeMillis() + 180_000
                 state.update { it.copy(banner = "Роутер перезагружается. Интернет вернётся через несколько минут.") }
             } catch (e: RouterException) {
+                if (sessionLost(e)) return@launch
+                writeError = e.message
                 state.update { it.copy(banner = e.message) }
             }
         }
@@ -314,7 +372,7 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
         pollJob?.cancel()
         client = null
         store.clearPassword()
-        state.update { it.copy(phase = Phase.LOGIN, password = "", snapshot = null, parental = null, routing = null) }
+        state.update { it.copy(phase = Phase.LOGIN, password = "", snapshot = null, parental = null, routing = null, log = null) }
         if (c != null) viewModelScope.launch(Dispatchers.IO) { c.logout() }
     }
 }
