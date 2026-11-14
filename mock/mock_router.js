@@ -7,6 +7,7 @@ if (!fs.existsSync(certFile)) cp.execSync(`openssl req -x509 -newkey rsa:2048 -n
 const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 const pem = publicKey.export({ type: 'spki', format: 'pem' });
 const aesEnc = (text, keyB64) => {
+  if (!keyB64) return JSON.parse(text);   // вход без RSA: роутер отвечает открытым JSON
   const ivFull = crypto.randomBytes(32), c = crypto.createCipheriv('aes-256-cbc', Buffer.from(keyB64, 'base64'), ivFull.subarray(0, 16));
   return { content: Buffer.concat([c.update(text), c.final()]).toString('base64'), iv: ivFull.toString('base64') };
 };
@@ -15,6 +16,10 @@ const aesDec = (content, keyB64, ivB64) => {
   return Buffer.concat([d.update(Buffer.from(content, 'base64')), d.final()]).toString();
 };
 let session = null, fails = 0;
+// TLS-соединения, по которым шли запросы приложения (не /__test): тест проверяет, что клиент их переиспользует.
+let appSockets = new Set();
+// Переключатели для автотестов клиента (POST /__test/...): ошибки разделов, испорченный вход, вход без RSA.
+let test = { status: {}, garbageLogin: false, noRsa: false };
 const status = { result: 'ZCFG_SUCCESS', Object: [{
   DeviceInfo: { ModelName: 'VMG8623-T50B', SoftwareVersion: 'V5.50(ABPM.7.3)V1', UpTime: 200000, SerialNumber: 'S000' },
   WanType: 'VDSL', WanRate_RX: 0, WanRate_TX: 0,
@@ -24,16 +29,16 @@ const status = { result: 'ZCFG_SUCCESS', Object: [{
     { Status: 'Up', LinkType: '', X_ZYXEL_SrvName: 'LAN', Encapsulation: '', DefaultGateway: false, IPv4Address: [{ IPAddress: '192.168.1.1' }], dnsv4Server: [] },
     { Status: 'Up', LinkType: 'PTM', X_ZYXEL_SrvName: 'Internet', Encapsulation: 'PPPoE', DefaultGateway: true, pppoeConnectionUpTime: 3700, IPv4Address: [{ IPAddress: '203.0.113.7' }], dnsv4Server: [{ DNSServer: '1.1.1.1' }] }],
   WiFiInfo: [
-    { SSID: 'Home', Enable: 1, Channel: 6, OperatingStandards: 'b,g,n', ModeEnabled: 'WPA2-Personal', wifiPassword: 'MUST_NOT_APPEAR' },
-    { SSID: 'Guest', Enable: 0, Channel: 6, OperatingStandards: 'b,g,n', ModeEnabled: 'WPA2-Personal', wifiPassword: 'MUST_NOT_APPEAR' },
-    { SSID: 'Home-5G', Enable: true, Channel: 44, OperatingStandards: 'a,n,ac', ModeEnabled: 'WPA2-Personal', wifiPassword: 'MUST_NOT_APPEAR' },
+    { SSID: 'Home', Enable: 1, Channel: 6, OperatingStandards: 'b,g,n', ModeEnabled: 'WPA2-Personal', wifiPassword: 'mock-home-24' },
+    { SSID: 'Guest', Enable: 0, Channel: 6, OperatingStandards: 'b,g,n', ModeEnabled: 'WPA2-Personal', wifiPassword: 'mock-guest' },
+    { SSID: 'Home-5G', Enable: true, Channel: 44, OperatingStandards: 'a,n,ac', ModeEnabled: 'WPA2-Personal', wifiPassword: 'mock;home:5' },
     { SSID: 'Guest-5G', Enable: false, Channel: 44, OperatingStandards: 'a,n,ac', ModeEnabled: 'None', wifiPassword: '' }],
 }] };
 const hosts = { result: 'ZCFG_SUCCESS', Object: [{ wanInfo: { wanStatus: 1 }, lanhosts: [
-  { Active: true, curHostName: 'MacBook &amp; Co', HostName: 'mac', IPAddress: '192.168.1.52', IPAddress6: 'fe80::1', PhysAddress: '14:33:75:00:00:01', X_ZYXEL_ConnectionType: 'Wi-Fi 5GHz', Layer1Interface: 'Device.WiFi.SSID.5', VendorClassID: '*', X_ZYXEL_SignalStrength: 4, X_ZYXEL_SNR: 34, X_ZYXEL_PhyRate: 585, X_ZYXEL_OperatingStandard: 'ac', X_ZYXEL_BytesReceived: 1788431209, X_ZYXEL_BytesSent: 106174729, LeaseTimeRemaining: 64036, Internet_Blocking_Enable: false },
-  { Active: 1, curHostName: '', HostName: 'tv-box', IPAddress: '192.168.1.60', PhysAddress: '14:33:75:00:00:02', X_ZYXEL_ConnectionType: 'Ethernet', Layer1Interface: 'Device.Ethernet.Interface.1', VendorClassID: 'atvbox-4403-czsk', X_ZYXEL_SignalStrength: 0, X_ZYXEL_BytesReceived: 278650487, X_ZYXEL_BytesSent: 16061331 },
-  { Active: 1, curHostName: '', HostName: '', DeviceName: 'Phone guest', IPAddress: '192.168.2.33', PhysAddress: '14:33:75:00:00:03', X_ZYXEL_ConnectionType: 'Wi-Fi 2.4GHz', Layer1Interface: 'WiFi.SSID.2', VendorClassID: 'android-dhcp-14', X_ZYXEL_SignalStrength: 5, X_ZYXEL_SNR: 29, X_ZYXEL_PhyRate: 144, X_ZYXEL_OperatingStandard: 'n', X_ZYXEL_BytesReceived: 24398, X_ZYXEL_BytesSent: 1182148, Internet_Blocking_Enable: true },
-  { Active: 1, curHostName: 'XRX9C-print', HostName: '', IPAddress: '192.168.1.70', PhysAddress: '14:33:75:00:00:05', X_ZYXEL_ConnectionType: 'Wi-Fi 2.4GHz', Layer1Interface: 'Device.WiFi.SSID.1', VendorClassID: 'XEROX Network Printer', X_ZYXEL_SignalStrength: 3, X_ZYXEL_SNR: 21, X_ZYXEL_PhyRate: 54, X_ZYXEL_OperatingStandard: 'g', X_ZYXEL_BytesReceived: 140293, X_ZYXEL_BytesSent: 271612 },
+  { Active: true, curHostName: 'MacBook &amp; Co', HostName: 'mac', IPAddress: '192.168.1.52', IPAddress6: 'fe80::1', PhysAddress: '14:33:75:00:00:01', X_ZYXEL_ConnectionType: 'Wi-Fi 5GHz', Layer1Interface: 'Device.WiFi.SSID.5', VendorClassID: '*', X_ZYXEL_SignalStrength: 4, X_ZYXEL_SNR: 34, X_ZYXEL_PhyRate: 585, X_ZYXEL_OperatingStandard: 'ac', X_ZYXEL_BytesReceived: 106174729, X_ZYXEL_BytesSent: 1788431209, LeaseTimeRemaining: 64036, Internet_Blocking_Enable: false },
+  { Active: 1, curHostName: '', HostName: 'tv-box', IPAddress: '192.168.1.60', PhysAddress: '14:33:75:00:00:02', X_ZYXEL_ConnectionType: 'Ethernet', Layer1Interface: 'Device.Ethernet.Interface.1', VendorClassID: 'atvbox-4403-czsk', X_ZYXEL_SignalStrength: 0, X_ZYXEL_BytesReceived: 16061331, X_ZYXEL_BytesSent: 278650487 },
+  { Active: 1, curHostName: '', HostName: '', DeviceName: 'Phone guest', IPAddress: '192.168.2.33', PhysAddress: '14:33:75:00:00:03', X_ZYXEL_ConnectionType: 'Wi-Fi 2.4GHz', Layer1Interface: 'WiFi.SSID.2', VendorClassID: 'android-dhcp-14', X_ZYXEL_SignalStrength: 5, X_ZYXEL_SNR: 29, X_ZYXEL_PhyRate: 144, X_ZYXEL_OperatingStandard: 'n', X_ZYXEL_BytesReceived: 1182148, X_ZYXEL_BytesSent: 24398, Internet_Blocking_Enable: true },
+  { Active: 1, curHostName: 'XRX9C-print', HostName: '', IPAddress: '192.168.1.70', PhysAddress: '14:33:75:00:00:05', X_ZYXEL_ConnectionType: 'Wi-Fi 2.4GHz', Layer1Interface: 'Device.WiFi.SSID.1', VendorClassID: 'XEROX Network Printer', X_ZYXEL_SignalStrength: 3, X_ZYXEL_SNR: 21, X_ZYXEL_PhyRate: 54, X_ZYXEL_OperatingStandard: 'g', X_ZYXEL_BytesReceived: 271612, X_ZYXEL_BytesSent: 140293 },
   { Active: false, curHostName: '', HostName: '', IPAddress: '', PhysAddress: '14:33:75:00:00:04', X_ZYXEL_ConnectionType: 'Wi-Fi 2.4GHz', Layer1Interface: 'Device.WiFi.SSID.1', VendorClassID: '*' }] }] };
 // Родительский контроль: Object[0] — общий статус и предел профилей, далее профили.
 const parental = { result: 'ZCFG_SUCCESS', Object: [
@@ -53,6 +58,7 @@ const rip = { result: 'ZCFG_SUCCESS', Object: [
   { Interface: 'Default', Version: 'RIPv2', RipOpMode: 'Active', Enable: false, DisableDefaultGw: false },
   { Interface: 'USB', Version: 'RIPv2', RipOpMode: 'Passive', Enable: false, DisableDefaultGw: false }] };
 const dalGet = { paren_ctl: parental, static_route: staticRoute, dns_route: dnsRoute, policy_route: policyRoute, rip };
+const parentalInitial = JSON.stringify(parental.Object);
 // Настоящий роутер возвращает Days строкой через запятую, даже если на запись пришёл массив.
 const norm = (o) => (Array.isArray(o.Days) ? { ...o, Days: o.Days.join(',') } : o);
 https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) }, (req, res) => {
@@ -60,10 +66,26 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
     const send = (code, obj, headers = {}) => { res.writeHead(code, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(obj)); console.log(req.method, req.url, code); };
     const authed = session && (req.headers.cookie || '').includes(`Session=${session.id}`);
     const url = req.url.split('&')[0];
+    if (url === '/__test/reset' && req.method === 'POST') {
+      session = null; fails = 0; appSockets = new Set(); test = { status: {}, garbageLogin: false, noRsa: false };
+      parental.Object.splice(0, parental.Object.length, ...JSON.parse(parentalInitial));
+      return send(200, { result: 'ok' });
+    }
+    if (url === '/__test/config' && req.method === 'POST') { Object.assign(test, JSON.parse(body || '{}')); return send(200, { result: 'ok' }); }
+    if (url === '/__test/expire' && req.method === 'POST') { session = null; return send(200, { result: 'ok' }); }
+    if (url === '/__test/state') return send(200, { session: !!session, fails, csrf: session && session.csrf, profiles: parental.Object.slice(1), connections: appSockets.size });
+    if (!url.startsWith('/__test/')) appSockets.add(req.socket);
     if (url === '/getBasicInformation') return send(200, { result: 'ZCFG_SUCCESS', ModelName: 'VMG8623-T50B', SoftwareVersion: 'V5.50(ABPM.7.3)V1', CurrentLanguage: 'cz' });
-    if (url === '/getRSAPublickKey') return send(200, { RSAPublicKey: pem, result: 'ZCFG_SUCCESS' });
+    if (url === '/getRSAPublickKey') return send(200, { RSAPublicKey: test.noRsa ? 'None' : pem, result: 'ZCFG_SUCCESS' });
     if (url === '/UserLogin' && req.method === 'POST') {
       let o, aes;
+      if (test.garbageLogin) return send(200, { iv: crypto.randomBytes(32).toString('base64'), content: 'bm90IGVuY3J5cHRlZA==' });
+      if (test.noRsa) {
+        o = JSON.parse(body);
+        if (o.Input_Account !== 'admin' || Buffer.from(o.Input_Passwd, 'base64').toString() !== 'testpass') { fails++; return send(401, { result: 'Invalid Username or Password' }); }
+        session = { id: crypto.randomBytes(8).toString('hex'), csrf: crypto.randomBytes(8).toString('hex'), aes: null };
+        return send(200, { result: 'ZCFG_SUCCESS', sessionkey: session.csrf }, { 'Set-Cookie': `Session=${session.id}; Path=/; Secure; HttpOnly` });
+      }
       try {
         const e = JSON.parse(body);
         aes = crypto.privateDecrypt({ key: privateKey, padding: crypto.constants.RSA_PKCS1_PADDING }, Buffer.from(e.key, 'base64')).toString();
@@ -77,6 +99,8 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
     }
     if (url.startsWith('/cgi-bin/')) {
       if (!authed) return send(401, { result: 'Invalid Username or Password' });
+      const testOid = (url.match(/\/cgi-bin\/DAL\?oid=([a-z_]+)/) || [])[1];
+      if (req.method === 'GET' && testOid && test.status[testOid]) return send(test.status[testOid], { result: 'ZCFG_NO_SUCH_OBJECT' });
       // Журнал: ответ — зашифрованный JSON-массив строк (как настоящий GET_LOG).
       if (url.startsWith('/cgi-bin/LogResult')) {
         const lines = [

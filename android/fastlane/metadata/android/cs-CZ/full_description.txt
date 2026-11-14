@@ -1,0 +1,19 @@
+Neoficiální aplikace pro správu domácího routeru Zyxel z telefonu, přímo přes vaši domácí síť.
+
+• Přehled: stav internetu, veřejná IP, rychlost linky, doba běhu.
+• Zařízení: všichni v síti s typem, signálem Wi-Fi, přenesenými daty, IP a MAC. Odpojená zařízení zůstávají v seznamu. Neznámá zařízení rozpozná podle výrobce a podle toho, co o sobě sama sdělí v síti: název, model, služby.
+• Sítě Wi-Fi: pásmo, kanál, zabezpečení, sítě pro hosty.
+• QR kód pro kteroukoli síť včetně sítě pro hosty: heslo se z routeru načte jen na vaši žádost a odejde jen do aplikace, kterou zvolíte.
+• Rodičovská kontrola: rozvrhy podle dnů a času pro vybraná zařízení, zapnutí a vypnutí jedním klepnutím.
+• Trasy a systémový protokol routeru se statistikou po dnech, týdnech a měsících.
+• Restart routeru.
+
+Bez cloudu a bez účtu: seznam zařízení, nastavení sítí, hesla ani protokol routeru neopustí telefon, pokud je sami nesdílíte. Heslo k routeru je uložené šifrovaně pouze v telefonu.
+
+Nemáte router po ruce? Na přihlašovací obrazovce klepněte na „Vyzkoušet bez routeru“ a prohlédněte si aplikaci na vestavěných ukázkových datech.
+
+Vyzkoušeno na VMG8623-T50B. Mnoho routerů Zyxel má stejné webové rozhraní, aplikace by proto měla fungovat i s modely VMG8825-T50, VMG3625-T50B, VMG4005-B50A, AX7501-B0, EX5601-T1, NR5103E, NR5307, NR7101, NR7102, NR7302, FWA505, FWA510, FWA710, LTE3202-M437, LTE5398-M904, LTE7490-M904. Dostupné funkce závisí na modelu a firmwaru.
+
+Aplikace je zdarma s reklamami; jednorázový nákup je vypne.
+
+Zyxel je ochranná známka společnosti Zyxel Networks Corporation. Aplikace není se společností Zyxel spojena ani jí schválena.

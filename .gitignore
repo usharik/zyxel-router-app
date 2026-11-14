@@ -16,3 +16,14 @@ __pycache__/
 
 # generated / temp
 mock/*.pem
+
+# Google Play / Firebase secrets
+android/app/google-services.json
+android/keystore.properties
+*.jks
+*.keystore
+*.p12
+android/play-api-key.json
+android/fastlane/report.xml
+android/fastlane/README.md
+android/.kotlin/

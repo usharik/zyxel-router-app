@@ -1,13 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- AdMob проверяет наличие сети перед запросом рекламы. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application
+        android:name=".ZyxelApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
-        android:label="Zyxel Router"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.ZyxelRouter">
-        <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="@string/admob_app_id" />
+        <!-- Вкладки — экраны Compose в одной Activity; их показывает Telemetry.screen. -->
+        <meta-data android:name="google_analytics_automatic_screen_reporting_enabled" android:value="false" />
+        <!-- Аналитика только для статистики использования: без рекламного идентификатора и персонализации рекламы. -->
+        <meta-data android:name="google_analytics_adid_collection_enabled" android:value="false" />
+        <meta-data android:name="google_analytics_default_allow_ad_personalization_signals" android:value="false" />
+        <!-- До ответа формы согласия ничего не собирается; включает AdsConsent (Analytics и Crashlytics). -->
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
+        <meta-data android:name="firebase_crashlytics_collection_enabled" android:value="false" />
+        <!-- Картинка QR-кода сети для «Поделиться»: временный файл в кэше, доступ получатель берёт по разовому разрешению. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+        <!-- Короткая подпись под значком: полное название обрезалось бы. -->
+        <activity android:name=".MainActivity" android:exported="true" android:label="@string/app_short_name" android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

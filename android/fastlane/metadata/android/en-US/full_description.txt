@@ -1,0 +1,19 @@
+Unofficial app to manage your Zyxel home router from your phone, directly over your home network.
+
+• Overview: internet status, external IP, line speed, uptime.
+• Devices: everyone on your network with type, Wi-Fi signal, traffic, IP and MAC. Devices that went offline stay in the list. Unknown devices are identified by manufacturer and by what they report about themselves on the network: name, model, services.
+• Wi-Fi networks: band, channel, security, guest networks.
+• Share any network, including the guest one, with a QR code: the password is read from the router only when you ask for it and goes only to the app you choose.
+• Parental control: schedules by day and time for chosen devices, turned on and off with one tap.
+• Routes and the router's system log with statistics by day, week and month.
+• Router reboot.
+
+No cloud and no account: device lists, network settings, passwords and the log from your router never leave your phone unless you share them yourself. The router password is stored encrypted on your phone only.
+
+No router at hand? Tap “Try without a router” on the login screen to explore the app with built-in sample data.
+
+Tested on VMG8623-T50B. It uses the same web interface as many other Zyxel routers, so it should also work with models such as VMG8825-T50, VMG3625-T50B, VMG4005-B50A, AX7501-B0, EX5601-T1, NR5103E, NR5307, NR7101, NR7102, NR7302, FWA505, FWA510, FWA710, LTE3202-M437, LTE5398-M904, LTE7490-M904. Available features depend on the model and firmware.
+
+The app is free with ads; a one-time purchase removes them.
+
+Zyxel is a trademark of Zyxel Networks Corporation. This app is not affiliated with or endorsed by Zyxel.

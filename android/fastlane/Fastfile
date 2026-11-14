@@ -1,0 +1,24 @@
+default_platform(:android)
+
+platform :android do
+  desc "Тесты, подписанный AAB и загрузка во внутреннее тестирование Google Play"
+  lane :internal do
+    project_root = File.expand_path("..", __dir__)
+    key_path = ENV["PLAY_STORE_JSON_KEY_PATH"] || File.join(project_root, "play-api-key.json")
+    UI.user_error!("Нужен ключ сервисного аккаунта Play: PLAY_STORE_JSON_KEY_PATH или android/play-api-key.json") unless File.file?(key_path)
+    UI.user_error!("Нужен android/keystore.properties для подписи") unless File.file?(File.join(project_root, "keystore.properties"))
+
+    gradle(project_dir: project_root, task: ":app:testDebugUnitTest :app:lintDebug")
+    gradle(project_dir: project_root, task: ":app:bundleRelease")   # упадёт, если в release тестовые ID AdMob
+    upload_to_play_store(
+      track: "internal",
+      aab: File.join(project_root, "app/build/outputs/bundle/release/app-release.aab"),
+      release_status: "draft",
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+end

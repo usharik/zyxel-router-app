@@ -14,26 +14,27 @@ class UiLogicTest {
     private fun profile(index: Int, enabled: Boolean) = ParentalProfile(index, "p$index", enabled, emptyList(), emptyList(), emptyList(), false, false)
     private fun parental(max: Int, count: Int) = ParentalControl(true, max, (1..count).map { profile(it, true) })
 
-    @Test fun pluralForms() {
-        val f = { n: Int -> plural(n, "устройство", "устройства", "устройств") }
-        assertEquals("1 устройство", f(1))
-        assertEquals("3 устройства", f(3))
-        assertEquals("5 устройств", f(5))
-        assertEquals("11 устройств", f(11))
-        assertEquals("14 устройств", f(14))
-        assertEquals("21 устройство", f(21))
-        assertEquals("112 устройств", f(112))
-        assertEquals("0 устройств", f(0))
-    }
-
     @Test fun lastSeenBuckets() {
         val now = 1_000_000L
-        assertEquals("давно", lastSeenLabel(0, now))
-        assertEquals("только что", lastSeenLabel(now - 30, now))
-        assertEquals("5 мин назад", lastSeenLabel(now - 300, now))
-        assertEquals("2 ч назад", lastSeenLabel(now - 7200, now))
-        assertEquals("1 день назад", lastSeenLabel(now - 86400, now))
-        assertEquals("3 дня назад", lastSeenLabel(now - 3 * 86400, now))
+        assertEquals(Ago.LongAgo, lastSeenAgo(0, now))
+        assertEquals(Ago.JustNow, lastSeenAgo(now - 30, now))
+        assertEquals(Ago.Minutes(5), lastSeenAgo(now - 300, now))
+        assertEquals(Ago.Hours(2), lastSeenAgo(now - 7200, now))
+        assertEquals(Ago.Days(1), lastSeenAgo(now - 86400, now))
+        assertEquals(Ago.Days(3), lastSeenAgo(now - 3 * 86400, now))
+    }
+
+    @Test fun dayLabelsFollowLocale() {
+        assertEquals("Mon", dayLabel("Mon", java.util.Locale.ENGLISH))
+        assertEquals("Пн", dayLabel("Mon", java.util.Locale.forLanguageTag("ru")))
+        assertEquals("Вс", dayLabel("Sun", java.util.Locale.forLanguageTag("ru")))
+        assertEquals("Mo", dayLabel("Mon", java.util.Locale.GERMAN))
+        assertEquals("Xyz", dayLabel("Xyz", java.util.Locale.ENGLISH))
+        assertEquals(7, DayCodes.map { dayLabel(it, java.util.Locale.forLanguageTag("uk")) }.toSet().size)
+        assertEquals("Po", dayLabel("Mon", java.util.Locale.forLanguageTag("cs")))
+        assertEquals("Январь", monthName(1, java.util.Locale.forLanguageTag("ru")))
+        assertEquals("Leden", monthName(1, java.util.Locale.forLanguageTag("cs")))
+        assertEquals("März", monthName(3, java.util.Locale.GERMAN))
     }
 
     @Test fun inactiveDeviceKeepsItsLastSeen() {
@@ -57,12 +58,12 @@ class UiLogicTest {
     }
 
     @Test fun profileValidationOrder() {
-        assertEquals("Укажите название профиля.", validateProfile("  ", 1, 1, "09:00", "10:00"))
-        assertEquals("Выберите хотя бы одно устройство.", validateProfile("a", 0, 1, "09:00", "10:00"))
-        assertEquals("Не больше 32 устройств.", validateProfile("a", 33, 1, "09:00", "10:00"))
-        assertEquals("Выберите хотя бы один день.", validateProfile("a", 1, 0, "09:00", "10:00"))
-        assertEquals("Время в формате ЧЧ:ММ.", validateProfile("a", 1, 1, "x", "10:00"))
-        assertTrue(validateProfile("a", 1, 1, "10:00", "10:00")!!.startsWith("Начало"))
+        assertEquals(ProfileError.NO_NAME, validateProfile("  ", 1, 1, "09:00", "10:00"))
+        assertEquals(ProfileError.NO_DEVICES, validateProfile("a", 0, 1, "09:00", "10:00"))
+        assertEquals(ProfileError.TOO_MANY_DEVICES, validateProfile("a", 33, 1, "09:00", "10:00"))
+        assertEquals(ProfileError.NO_DAYS, validateProfile("a", 1, 0, "09:00", "10:00"))
+        assertEquals(ProfileError.BAD_TIME, validateProfile("a", 1, 1, "x", "10:00"))
+        assertEquals(ProfileError.START_NOT_BEFORE_END, validateProfile("a", 1, 1, "10:00", "10:00"))
         assertNull(validateProfile("a", 1, 1, "9:00", "10:00"))     // сравнение по минутам, а не строк
         assertNull(validateProfile("a", 32, 7, "00:00", "24:00"))
     }
@@ -100,12 +101,11 @@ class UiLogicTest {
 
     @Test fun recoveryDoesNotRepeatNonIdempotentWrite() {
         var calls = 0; var relogins = 0
-        val e = assertThrows(RouterException.Failed::class.java) {
+        assertThrows(RouterException.SessionRefreshed::class.java) {
             withSessionRecovery<Unit>(false, { relogins++ }) { calls++; throw RouterException.SessionExpired }
         }
         assertEquals(1, calls)
         assertEquals(1, relogins)
-        assertTrue(e.message!!.contains("Повторите"))
     }
 
     @Test fun recoveryPropagatesRejectedRelogin() {
@@ -126,8 +126,8 @@ class UiLogicTest {
 
     @Test fun otherErrorsAreNotRecovered() {
         var relogins = 0
-        assertThrows(RouterException.Failed::class.java) {
-            withSessionRecovery<Unit>(true, { relogins++ }) { throw RouterException.Failed("x") }
+        assertThrows(RouterException.ProfileNotFound::class.java) {
+            withSessionRecovery<Unit>(true, { relogins++ }) { throw RouterException.ProfileNotFound }
         }
         assertEquals(0, relogins)
     }
@@ -145,5 +145,58 @@ class UiLogicTest {
 
     @Test fun emptyDaysStringBecomesEmptyArray() {
         assertEquals(0, (daysAsArray(JSONObject().put("Days", "")).get("Days") as JSONArray).length())
+    }
+
+    @Test fun lastSeenBoundaries() {
+        val now = 1_000_000L
+        assertEquals(Ago.JustNow, lastSeenAgo(now - 89, now))
+        assertEquals(Ago.Minutes(1), lastSeenAgo(now - 90, now))
+        assertEquals(Ago.Minutes(59), lastSeenAgo(now - 3599, now))
+        assertEquals(Ago.Hours(1), lastSeenAgo(now - 3600, now))
+        assertEquals(Ago.Days(1), lastSeenAgo(now - 86400, now))
+    }
+
+    @Test fun rangeUntilMidnight() {
+        assertNull("конец 00:00 — до полуночи", validateProfile("n", 1, 1, "22:00", "00:00"))
+        assertEquals("22:00-24:00", profileTimeRange("22:00", "0:00"))
+        assertEquals("09:00-17:00", profileTimeRange("9:00", "17:00"))
+        assertNull(profileTimeRange("25:00", "17:00"))
+        assertNull("00:00–00:00 — весь день", validateProfile("n", 1, 1, "00:00", "00:00"))
+        assertEquals(ProfileError.START_NOT_BEFORE_END, validateProfile("n", 1, 1, "10:00", "09:00"))
+    }
+
+    @Test fun multipleRangesKeptOnlyWhenFirstUnchanged() {
+        val original = listOf("9:00-12:00", "14:00-17:00")
+        assertEquals("сравнение нормализованное", "09:00-12:00,14:00-17:00", timeRangesToSave(original, "09:00-12:00"))
+        assertEquals("08:00-12:00", timeRangesToSave(original, "08:00-12:00"))
+        assertEquals("08:00-12:00", timeRangesToSave(listOf("09:00-12:00"), "08:00-12:00"))
+        assertEquals("10:00-11:00", timeRangesToSave(emptyList(), "10:00-11:00"))
+    }
+
+    @Test fun backgroundReloginStopsOnAnyRouterRefusal() {
+        assertTrue("роутер недоступен — пароль не отправлялся", keepPollingAfterReloginFailure(RouterException.Unreachable))
+        for (e in listOf(RouterException.InvalidCredentials, RouterException.LoginRejected("x"), RouterException.Locked(60),
+            RouterException.TooManySessions, RouterException.DuplicateSession, RouterException.BadLoginData, RouterException.LoginUnreadable, RouterException.SessionExpired)) {
+            assertFalse(e.toString(), keepPollingAfterReloginFailure(e))
+        }
+    }
+
+    @Test fun loginFailuresEndTheSession() {
+        assertTrue(isLoginFailure(RouterException.LoginRejected("Wrong")))
+        assertTrue(isLoginFailure(RouterException.CertificateChanged("AB")))
+        assertFalse(isLoginFailure(RouterException.Unreachable))
+        assertFalse(isLoginFailure(RouterException.NoData("rip", 404)))
+        assertFalse(isLoginFailure(RouterException.SessionRefreshed))
+        // Оборванный ответ на чтение раздела — ошибка запроса, а нечитаемый ответ на вход — отказ.
+        assertFalse(isLoginFailure(RouterException.BadResponse))
+        assertTrue(isLoginFailure(RouterException.LoginUnreadable))
+        assertTrue("снимок после удачного входа не прочитался — опрос продолжается", keepPollingAfterReloginFailure(RouterException.BadResponse))
+    }
+
+    @Test fun logSeverityGroups() {
+        assertEquals("err", severityGroup("crit"))
+        assertEquals("err", severityGroup("emerg"))
+        assertEquals("warning", severityGroup("warn"))
+        assertEquals("info", severityGroup("INFO"))
     }
 }

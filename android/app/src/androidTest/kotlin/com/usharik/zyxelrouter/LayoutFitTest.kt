@@ -9,6 +9,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.test.platform.app.InstrumentationRegistry
+import android.content.res.Configuration
+import android.content.res.Resources
+import java.util.Locale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -29,22 +36,36 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
-/** Проверяет на устройстве, что элементы не вылезают за границы на узких экранах и с крупным шрифтом. */
+/** Проверяет на устройстве, что элементы не вылезают за границы на узких экранах, с крупным шрифтом и на всех языках. */
 @RunWith(Parameterized::class)
-class LayoutFitTest(private val widthDp: Int, private val fontScale: Float) {
+class LayoutFitTest(private val widthDp: Int, private val fontScale: Float, private val language: String) {
     companion object {
         @JvmStatic
-        @Parameterized.Parameters(name = "{0}dp x{1}")
-        fun cases(): List<Array<Any>> = listOf(232, 272, 400).flatMap { w -> listOf(1f, 1.3f, 2f).map { arrayOf<Any>(w, it) } }
+        @Parameterized.Parameters(name = "{0}dp x{1} {2}")
+        fun cases(): List<Array<Any>> = listOf("en", "ru", "uk", "cs", "de").flatMap { lang ->
+            listOf(232, 272, 400).flatMap { w -> listOf(1f, 1.3f, 2f).map { arrayOf<Any>(w, it, lang) } }
+        }
     }
 
     @get:Rule val rule = createComposeRule()
     private val width: Dp get() = widthDp.dp
-    private val days = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+    private val testLocale: Locale = Locale.forLanguageTag(language)
+    private val res: Resources by lazy {
+        val app = InstrumentationRegistry.getInstrumentation().targetContext
+        app.createConfigurationContext(Configuration(app.resources.configuration).apply { setLocale(testLocale) }).resources
+    }
+    private val days get() = DayCodes.map { dayLabel(it, testLocale) }
 
     private fun show(content: @Composable () -> Unit) = rule.setContent {
         val density = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+        val context = LocalContext.current
+        val config = Configuration(LocalConfiguration.current).apply { setLocale(testLocale) }
+        val localized = remember(language) { context.createConfigurationContext(config) }
+        CompositionLocalProvider(
+            LocalDensity provides Density(density.density, fontScale),
+            LocalConfiguration provides config,
+            LocalContext provides localized,
+        ) {
             MaterialTheme { Box(Modifier.width(width).testTag("parent")) { content() } }
         }
     }
@@ -52,7 +73,9 @@ class LayoutFitTest(private val widthDp: Int, private val fontScale: Float) {
     private fun widthPx(tag: String) = rule.onNodeWithTag(tag).fetchSemanticsNode().size.width
 
     @Test fun allSevenDaysFitAndAreNotClipped() {
-        show { DaySelector(emptyList()) {} }
+        var seen: Locale? = null
+        show { seen = currentLocale(); DaySelector(emptyList()) {} }
+        assertEquals("язык композиции", language, seen?.language)
         val parent = rule.onNodeWithTag("parent").getBoundsInRoot()
         val cell = widthPx("parent").toFloat() / days.size
         days.forEach { d ->
@@ -64,41 +87,54 @@ class LayoutFitTest(private val widthDp: Int, private val fontScale: Float) {
         }
     }
 
+    /** На Android java.time для части форм возвращает номер вместо названия — подписи должны быть словами. */
+    @Test fun dayAndMonthNamesAreWords() {
+        days.forEach { assertTrue("день «$it» — не название", it.any(Char::isLetter)) }
+        (1..12).map { monthName(it, testLocale) }.forEach { assertTrue("месяц «$it» — не название", it.any(Char::isLetter)) }
+        // Чешский шаблон даты цифровой («12. 1.»): проверяем только, что день и месяц на месте.
+        dayMonthText(12, 1, testLocale).let { assertTrue("дата «$it»", it.contains("12") && it != "—") }
+    }
+
     @Test fun daysToggleAndShareTheRow() {
         val selected = mutableStateListOf<String>()
         show { DaySelector(selected) { c -> if (c in selected) selected.remove(c) else selected.add(c) } }
-        rule.onNodeWithText("Вс").assertIsOff().performClick()
-        rule.onNodeWithText("Вс").assertIsOn()
+        val sunday = dayLabel("Sun", testLocale)
+        rule.onNodeWithText(sunday).assertIsOff().performClick()
+        rule.onNodeWithText(sunday).assertIsOn()
         assertEquals(listOf("Sun"), selected.toList())
         val tops = days.map { rule.onNodeWithText(it).getBoundsInRoot().top }.toSet()
         assertEquals("все дни в одном ряду", 1, tops.size)
     }
 
     @Test fun longDeviceNameDoesNotPushStatusOut() {
-        show { ListRow(Icons.Default.Wifi, true, "Очень-длинное-имя-устройства-".repeat(4), true, "Телефон · 192.168.1.2", "В сети", "Very-Long-Network-Name-5GHz", blocked = true) }
+        val online = res.getString(R.string.online)
+        show { ListRow(Icons.Default.Wifi, true, "Очень-длинное-имя-устройства-".repeat(4), true, "${res.getString(R.string.type_phone)} · 192.168.1.2", online, "Very-Long-Network-Name-5GHz", blocked = true) }
         val parent = rule.onNodeWithTag("parent").getBoundsInRoot()
-        val status = rule.onNodeWithText("В сети").getBoundsInRoot()
+        val status = rule.onNodeWithText(online).getBoundsInRoot()
         assertTrue("статус за правым краем", status.right <= parent.right)
         assertTrue("статусу не осталось ширины", status.right - status.left > 0.dp)
-        assertTrue("метка потеряна", rule.onNodeWithText("заблок.").getBoundsInRoot().let { it.right <= parent.right && it.right - it.left > 0.dp })
+        assertTrue("метка потеряна", rule.onNodeWithText(res.getString(R.string.label_blocked)).getBoundsInRoot().let { it.right <= parent.right && it.right - it.left > 0.dp })
     }
 
     @Test fun timeButtonsAreNotClipped() {
         show { TimeRangeButtons("00:00", "23:59", {}, {}) }
         val half = widthPx("parent") / 2
-        listOf("с 00:00", "до 23:59").forEach {
+        val from = res.getString(R.string.time_from, "00:00")
+        val to = res.getString(R.string.time_to, "23:59")
+        listOf(from, to).forEach {
             assertTrue("$it шире кнопки", rule.onNodeWithText(it).fetchSemanticsNode().size.width < half)
         }
         val parent = rule.onNodeWithTag("parent").getBoundsInRoot()
-        assertTrue(rule.onNodeWithText("до 23:59").getBoundsInRoot().right <= parent.right)
+        assertTrue(rule.onNodeWithText(to).getBoundsInRoot().right <= parent.right)
     }
 
     @Test fun fittedStyleKeepsLongestLabelOnOneLine() {
         val available = width / 6
-        val labels = listOf("Обзор", "Устройства", "Маршруты")
+        val labels = listOf(R.string.tab_overview, R.string.tab_devices, R.string.tab_wifi, R.string.tab_parental, R.string.tab_routes, R.string.tab_log).map(res::getString)
+        val longest = labels.maxBy { it.length }
         show {
             val style = fittedStyle(labels, available, MaterialTheme.typography.labelMedium)
-            Text(labels[1], Modifier.testTag("label"), style = style, maxLines = 1, softWrap = false)
+            Text(longest, Modifier.testTag("label"), style = style, maxLines = 1, softWrap = false)
         }
         val px = with(rule.density) { available.toPx() }
         assertTrue("подпись шире доступного", widthPx("label") <= px + 1)

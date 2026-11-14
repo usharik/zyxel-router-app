@@ -56,5 +56,17 @@ class CredentialStore(context: Context) {
 
     fun clearPassword() = prefs.edit { remove("pw"); remove("iv") }
 
+    /** До какого момента (мс Unix) роутер заблокировал вход: автовход в это время только продлил бы блокировку. */
+    var lockedUntil: Long
+        get() = prefs.getLong("locked_until", 0)
+        set(value) = prefs.edit { putLong("locked_until", value) }
+
+    /** Отпечатки сертификатов роутеров по адресу; новый закрепляет «Доверять новому сертификату». */
+    val pins: CertificatePins = object : CertificatePins {
+        override fun get(host: String) = prefs.getString("cert:$host", null)
+        override fun put(host: String, fingerprint: String) = prefs.edit { putString("cert:$host", fingerprint) }
+    }
+
+
     private companion object { const val ALIAS = "router_password" }
 }

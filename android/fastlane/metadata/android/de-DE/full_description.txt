@@ -1,0 +1,19 @@
+Inoffizielle App, mit der Sie Ihren Zyxel-Heimrouter vom Smartphone aus verwalten – direkt über Ihr Heimnetz.
+
+• Übersicht: Internetstatus, externe IP, Leitungsgeschwindigkeit, Laufzeit.
+• Geräte: alle im Netz mit Typ, WLAN-Signal, Datenverkehr, IP und MAC. Getrennte Geräte bleiben in der Liste. Unbekannte Geräte werden anhand des Herstellers und ihrer eigenen Angaben im Netzwerk erkannt: Name, Modell, Dienste.
+• WLAN-Netze: Frequenzband, Kanal, Verschlüsselung, Gastnetze.
+• Jedes Netz per QR-Code teilen, auch das Gastnetz: Das Passwort wird nur auf Ihren Wunsch vom Router gelesen und geht nur an die App, die Sie auswählen.
+• Kindersicherung: Zeitpläne nach Tagen und Uhrzeit für ausgewählte Geräte, mit einem Tippen ein- und ausschalten.
+• Routen und das Systemprotokoll des Routers mit Statistik nach Tag, Woche und Monat.
+• Router-Neustart.
+
+Keine Cloud, kein Konto: Geräteliste, Netzwerkeinstellungen, Passwörter und Protokoll Ihres Routers verlassen das Smartphone nicht, außer Sie teilen sie selbst. Das Router-Passwort wird verschlüsselt nur auf dem Smartphone gespeichert.
+
+Kein Router zur Hand? Tippen Sie auf dem Anmeldebildschirm auf „Ohne Router ausprobieren“ und sehen Sie sich die App mit eingebauten Beispieldaten an.
+
+Getestet mit VMG8623-T50B. Viele Zyxel-Router nutzen dieselbe Weboberfläche, daher sollte die App auch mit Modellen wie VMG8825-T50, VMG3625-T50B, VMG4005-B50A, AX7501-B0, EX5601-T1, NR5103E, NR5307, NR7101, NR7102, NR7302, FWA505, FWA510, FWA710, LTE3202-M437, LTE5398-M904, LTE7490-M904 funktionieren. Der Funktionsumfang hängt von Modell und Firmware ab.
+
+Die App ist kostenlos mit Werbung; ein einmaliger Kauf entfernt sie.
+
+Zyxel ist eine Marke der Zyxel Networks Corporation. Diese App steht in keiner Verbindung zu Zyxel und wird nicht von Zyxel unterstützt.

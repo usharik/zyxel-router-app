@@ -423,7 +423,8 @@ public func parseSnapshot(status: [String: Any], hosts: [String: Any]) -> Router
             type: deviceType(vendorClass: vendorClass, hostName: host),
             vendorClass: vendorClass, signal: Field.int(item["X_ZYXEL_SignalStrength"]), snr: Field.int(item["X_ZYXEL_SNR"]),
             phyRate: Field.int(item["X_ZYXEL_PhyRate"]), wifiStandard: Field.str(item["X_ZYXEL_OperatingStandard"]),
-            bytesDown: Field.int(item["X_ZYXEL_BytesReceived"]), bytesUp: Field.int(item["X_ZYXEL_BytesSent"]),
+            // Счётчики со стороны роутера: «Sent» — отправлено роутером устройству, то есть скачано устройством.
+            bytesDown: Field.int(item["X_ZYXEL_BytesSent"]), bytesUp: Field.int(item["X_ZYXEL_BytesReceived"]),
             ipv6: !Field.str(item["IPAddress6"]).isEmpty, staticIP: Field.bool(item["dhcp4StaticAddrEnable"]) || !Field.str(item["staticIP"]).isEmpty,
             leaseRemaining: Field.int(item["LeaseTimeRemaining"]), blocked: Field.bool(item["Internet_Blocking_Enable"]),
             details: deviceDetails(item), lastSeen: 0)

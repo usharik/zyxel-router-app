@@ -5,6 +5,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,7 +39,8 @@ class RouterClientTest {
         val s = parseSnapshot(sampleStatus(), sampleHosts())
         val byName = s.devices.associateBy { it.name }
         assertEquals("Home-5G", byName["mac"]?.network)
-        assertEquals("Проводная сеть", byName["tv"]?.network)
+        assertEquals("проводное устройство без SSID", "", byName["tv"]?.network)
+        assertNull(bandOfConnection(byName["tv"]!!.connection))
         assertEquals("Guest", byName["phone"]?.network)
         assertTrue(byName["phone"]?.guest == true)
         assertEquals("203.0.113.7", s.wanIP)
@@ -47,8 +49,74 @@ class RouterClientTest {
 
     @Test fun wifiBandFromStandards() {
         val s = parseSnapshot(sampleStatus(), sampleHosts())
-        assertEquals("5 ГГц", s.wifi.first { it.ssid == "Home-5G" }.band)
-        assertEquals("2,4 ГГц", s.wifi.first { it.ssid == "Home" }.band)
+        assertEquals(WifiBand.GHZ_5, s.wifi.first { it.ssid == "Home-5G" }.band)
+        assertEquals(WifiBand.GHZ_2_4, s.wifi.first { it.ssid == "Home" }.band)
+    }
+
+    @Test fun wifiBandPrefersFrequencyField() {
+        // Wi-Fi 6: «ax» есть и у 2,4 ГГц, поэтому решает OperatingFrequencyBand.
+        val ax24 = JSONObject().put("OperatingFrequencyBand", "2.4GHz").put("OperatingStandards", "b,g,n,ax")
+        assertEquals(WifiBand.GHZ_2_4, wifiBand(ax24, 0, 4))
+        assertEquals(WifiBand.GHZ_5, wifiBand(JSONObject().put("OperatingFrequencyBand", "5GHz").put("OperatingStandards", "a,n,ac,ax"), 0, 4))
+        assertEquals("без поля — по стандартам", WifiBand.GHZ_2_4, wifiBand(JSONObject().put("OperatingStandards", "b,g,n,ax"), 3, 4))
+        assertEquals("только ax — по позиции", WifiBand.GHZ_5, wifiBand(JSONObject().put("OperatingStandards", "ax"), 3, 4))
+    }
+
+    @Test fun guestNetworkFromMainSsidFlag() {
+        assertFalse(isGuestNetwork(JSONObject().put("X_ZYXEL_MainSSID", true), 1))
+        assertTrue(isGuestNetwork(JSONObject().put("X_ZYXEL_MainSSID", false), 0))
+        assertTrue("без флага — по позиции", isGuestNetwork(JSONObject(), 1))
+    }
+
+    @Test fun sessionPinsCommitOnlyNewFingerprint() {
+        val stored = MemoryCertificatePins()
+        val session = SessionPins(stored)
+        session.put("192.168.1.1", "AA")
+        assertEquals("клиент видит отпечаток до входа", "AA", session.get("192.168.1.1"))
+        assertNull("но не сохраняет его", stored.get("192.168.1.1"))
+        session.commit()
+        assertEquals("AA", stored.get("192.168.1.1"))
+        stored.put("192.168.1.1", "BB")
+        SessionPins(stored).apply { put("192.168.1.1", "CC"); commit() }
+        assertEquals("закреплённый отпечаток не перезаписывается", "BB", stored.get("192.168.1.1"))
+    }
+
+    @Test fun hostOfAddress() {
+        assertEquals("192.168.1.1", RouterClient.hostOf(" 192.168.1.1:8443 "))
+    }
+
+    @Test fun addressIsOnlyIpAndPort() {
+        assertEquals("192.168.1.1" to null, RouterClient.parseAddress("192.168.1.1"))
+        assertEquals("10.0.0.1" to 8443, RouterClient.parseAddress(" 10.0.0.1:8443 "))
+        // Всё, что увело бы запрос на другой хост, отвергается ещё до соединения.
+        for (bad in listOf("192.168.1.1:80@evil.com", "192.168.1.1/x", "https://192.168.1.1", "192.168.1.1:0", "192.168.1.1:70000", "router.local", "")) {
+            assertNull(bad, RouterClient.parseAddress(bad))
+            assertThrows(bad, RouterException.BadAddress::class.java) { RouterClient(bad) }
+        }
+        assertThrows(RouterException.BadAddress::class.java) { RouterClient("8.8.8.8") }
+    }
+
+    @Test fun trustedPinsCommitAfterLoginOnly() {
+        val stored = MemoryCertificatePins().apply { put("192.168.1.1", "OLD") }
+        val trusted = TrustedPins(stored, "192.168.1.1", "NEW")
+        val session = SessionPins(trusted)
+        assertEquals("клиент сверяет с новым отпечатком", "NEW", session.get("192.168.1.1"))
+        assertEquals("до входа хранилище не меняется", "OLD", stored.get("192.168.1.1"))
+        session.commit()
+        assertEquals("NEW", stored.get("192.168.1.1"))
+    }
+
+    @Test fun timeUsesLatinDigitsInAnyLocale() {
+        val saved = java.util.Locale.getDefault()
+        try {
+            for (tag in listOf("fa-IR", "ar-EG", "th-TH-u-nu-thai", "hi-IN-u-nu-deva")) {
+                java.util.Locale.setDefault(java.util.Locale.forLanguageTag(tag))
+                assertEquals(tag, "09:00", normalizeTime("9:00"))
+                assertEquals(tag, "22:00-24:00", profileTimeRange("22:00", "0:00"))
+            }
+        } finally {
+            java.util.Locale.setDefault(saved)
+        }
     }
 
     @Test fun diagnosticsHidesValues() {
@@ -89,7 +157,9 @@ class RouterClientTest {
         assertEquals("office", r.staticRoutes[0].title)
         assertEquals("work.example.com", r.dnsRoutes[0].title)
         assertEquals("vpn", r.policyRoutes[0].title)
-        assertEquals("Интерфейс 1", r.rip[0].title)
+        assertEquals(RouteDetail.Rip("1", "RIPv2", "Passive"), r.rip[0].detail)
+        assertEquals(RouteDetail.Static("10.0.0.0 / 255.255.255.0", "192.168.1.2"), r.staticRoutes[0].detail)
+        assertEquals(RouteDetail.Policy("192.168.1.60", false, ""), r.policyRoutes[0].detail)
         val ids = (r.staticRoutes + r.dnsRoutes + r.policyRoutes + r.rip).map { it.id }
         assertEquals(ids.size, ids.toSet().size)
     }
@@ -115,18 +185,26 @@ class RouterClientTest {
         assertFalse(RouterClient.isPrivateIPv4("172.32.0.1"))
         assertFalse(RouterClient.isPrivateIPv4("1.2.3"))
         assertFalse(RouterClient.isPrivateIPv4(""))
+        // Ведущий ноль часть систем читает как восьмеричное: 010.0.0.1 — это 8.0.0.1, публичный адрес.
+        assertFalse(RouterClient.isPrivateIPv4("010.0.0.1"))
+        assertFalse(RouterClient.isPrivateIPv4("172.016.0.1"))
+        assertNull(RouterClient.parseAddress("010.0.0.1"))
+        assertNull(RouterClient.parseAddress("192.168.01.1"))
+        assertNull(RouterClient.parseAddress("192.168.1.1:0"))
+        assertEquals("192.168.0.1" to null, RouterClient.parseAddress("192.168.0.1"))
+        assertTrue("loopback — только в отладочной сборке (мок-роутер)", RouterClient.isPrivateIPv4("127.0.0.1") == BuildConfig.DEBUG)
     }
     @Test fun deviceTypeInference() {
-        assertEquals("Телефон или планшет", deviceType("android-dhcp-13", ""))
-        assertEquals("Телефон или планшет", deviceType("HUAWEI:android:QC_Reference_Phone", ""))
-        assertEquals("Принтер", deviceType("XEROX Network Printer", ""))
-        assertEquals("Компьютер", deviceType("MSFT 5.0", ""))
-        assertEquals("ТВ-приставка", deviceType("atvbox-4403-czsk", ""))
-        assertEquals("IoT-устройство", deviceType("udhcp 1.36.0", ""))
-        assertEquals("Компьютер", deviceType("", "MBP-aleks"))
-        assertEquals("Телефон или планшет", deviceType("", "iPhone"))
-        assertEquals("IoT-устройство", deviceType("", "xiaomi_vacuum"))
-        assertEquals("Неизвестно", deviceType("*", "неведомое"))
+        assertEquals(DeviceType.PHONE, deviceType("android-dhcp-13", ""))
+        assertEquals(DeviceType.PHONE, deviceType("HUAWEI:android:QC_Reference_Phone", ""))
+        assertEquals(DeviceType.PRINTER, deviceType("XEROX Network Printer", ""))
+        assertEquals(DeviceType.COMPUTER, deviceType("MSFT 5.0", ""))
+        assertEquals(DeviceType.TV, deviceType("atvbox-4403-czsk", ""))
+        assertEquals(DeviceType.IOT, deviceType("udhcp 1.36.0", ""))
+        assertEquals(DeviceType.COMPUTER, deviceType("", "MBP-aleks"))
+        assertEquals(DeviceType.PHONE, deviceType("", "iPhone"))
+        assertEquals(DeviceType.IOT, deviceType("", "xiaomi_vacuum"))
+        assertEquals(DeviceType.UNKNOWN, deviceType("*", "неведомое"))
     }
 
     @Test fun logParseAndAggregate() {
@@ -149,7 +227,8 @@ class RouterClientTest {
         assertEquals(3, byDay.size)
         assertEquals(2, byDay[0].count)
         val byMonth = logAggregate(e, LogPeriod.MONTH)
-        assertEquals("ноя", byMonth[0].label)
+        assertEquals(11, byMonth[0].month)
+        assertEquals(LogPeriod.MONTH, byMonth[0].period)
         assertEquals(3, byMonth[0].count)
         assertEquals(2, byMonth.size)
         assertEquals(4, logCountsBy(e) { it.severity }.sumOf { it.count })
@@ -160,26 +239,41 @@ class RouterClientTest {
         assertEquals("AA:BB:CC:DD:EE:FF", normalizeMAC("AA-BB-CC-DD-EE-FF"))
         assertNull(normalizeMAC("zz:bb:cc:dd:ee:ff"))
         assertNull(normalizeMAC("aa:bb:cc:dd:ee"))
-        assertNull(normalizeMAC("aabbccddeeff"))
+        assertEquals("без разделителей", "AA:BB:CC:DD:EE:FF", normalizeMAC("aabbccddeeff"))
+        assertEquals("формат Cisco", "AA:BB:CC:DD:EE:FF", normalizeMAC("aabb.ccdd.eeff"))
+        assertEquals("пробелы из буфера", "AA:BB:CC:DD:EE:FF", normalizeMAC("  aa:bb:cc:dd:ee:ff \n"))
+        assertNull("разделители вперемешку", normalizeMAC("aa:bbcc:dd:ee:ff"))
+        assertNull(normalizeMAC("aabbccddeeff00"))
+        assertNull(normalizeMAC(""))
     }
 
     @Test fun offlineDeviceFactory() {
-        val off = offlineDevice("AA:BB:CC:DD:EE:01", "PC", "Компьютер", "Ethernet", 123)
+        val off = offlineDevice("AA:BB:CC:DD:EE:01", "PC", DeviceType.COMPUTER, "Ethernet", 123)
         assertFalse(off.online)
         assertEquals("AA:BB:CC:DD:EE:01", off.mac)
         assertEquals("PC", off.name)
-        assertEquals("Проводная сеть", off.network)
+        assertEquals("", off.network)
         assertEquals(123L, off.lastSeen)
-        val w = offlineDevice("AA:BB:CC:DD:EE:02", "", "", "Wi-Fi 5GHz", 0)
+        val w = offlineDevice("AA:BB:CC:DD:EE:02", "", DeviceType.UNKNOWN, "Wi-Fi 5GHz", 0)
         assertEquals("AA:BB:CC:DD:EE:02", w.name)
-        assertEquals("Wi-Fi", w.network)
+        assertEquals(WifiBand.GHZ_5, bandOfConnection(w.connection))
     }
 
     @Test fun bytesFormat() {
-        assertEquals("0 Б", formatBytes(0))
-        assertEquals("512 Б", formatBytes(512))
-        assertEquals("1,5 КБ", formatBytes(1536))
-        assertEquals("1,7 ГБ", formatBytes(1788431209))
+        assertEquals("0 B", formatBytes(0))
+        assertEquals("512 B", formatBytes(512))
+        assertEquals("1.5 KB", formatBytes(1536))
+        val ru = listOf("Б", "КБ", "МБ", "ГБ", "ТБ")
+        assertEquals("1,7 ГБ", formatBytes(1788431209, ru, java.util.Locale.forLanguageTag("ru")))
+        assertEquals("1,5 kB", formatBytes(1536, listOf("B", "kB", "MB", "GB", "TB"), java.util.Locale.forLanguageTag("cs")))
+    }
+
+    @Test fun legacyDeviceTypesFromHistory() {
+        assertEquals(DeviceType.PRINTER, DeviceType.parse("Принтер"))
+        assertEquals(DeviceType.PHONE, DeviceType.parse("Телефон или планшет"))
+        assertEquals(DeviceType.TV, DeviceType.parse("TV"))
+        assertEquals(DeviceType.UNKNOWN, DeviceType.parse("Неизвестно"))
+        assertEquals(DeviceType.UNKNOWN, DeviceType.parse(""))
     }
 }
 
@@ -197,7 +291,7 @@ class RealFixtureTest {
         assertTrue("интернет Up (VDSL), LAN Default/None не мешает", s.internetUp)
         assertTrue(s.wanIP.isNotEmpty())
         assertTrue("устройства разобраны", s.devices.size > 5)
-        assertTrue(s.wifi.any { it.band == "5 ГГц" } && s.wifi.any { it.band == "2,4 ГГц" })
+        assertTrue(s.wifi.any { it.band == WifiBand.GHZ_5 } && s.wifi.any { it.band == WifiBand.GHZ_2_4 })
         assertFalse("значения не попадают в диагностику", s.schema.contains("198.51.100") || s.schema.contains("14:33:75"))
     }
 
@@ -235,9 +329,13 @@ class RealFixtureTest {
         val s = parseSnapshot(firstObject(card!!), firstObject(lan!!))
         assertTrue("реальный трафик: принятые байты", s.devices.any { it.bytesDown > 0 })
         assertTrue("реальный трафик: отправленные байты", s.devices.any { it.bytesUp > 0 })
+        // ТВ-приставка почти только скачивает: роутер отправил ей 3,9 ГБ, а получил от неё 81 МБ.
+        val tvBox = s.devices.single { it.vendorClass.startsWith("atvbox") }
+        assertEquals(3_919_238_647L, tvBox.bytesDown)
+        assertEquals(81_247_759L, tvBox.bytesUp)
         assertTrue("сигнал 1..5", s.devices.any { it.signal in 1..5 })
         assertTrue("все поля заполнены", s.devices.all { it.details.isNotEmpty() })
-        assertTrue("распознан принтер", s.devices.any { it.type == "Принтер" })
-        assertTrue("распознан Android", s.devices.any { it.type == "Телефон или планшет" })
+        assertTrue("распознан принтер", s.devices.any { it.type == DeviceType.PRINTER })
+        assertTrue("распознан Android", s.devices.any { it.type == DeviceType.PHONE })
     }
 }
