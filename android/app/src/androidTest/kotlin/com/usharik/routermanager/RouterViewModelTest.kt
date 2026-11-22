@@ -38,6 +38,9 @@ class RouterViewModelTest {
         @Volatile var loginGate: java.util.concurrent.CountDownLatch? = null
         /** Запись родительского контроля ждёт, пока тест её не отпустит. */
         @Volatile var writeGate: java.util.concurrent.CountDownLatch? = null
+        /** Одно следующее чтение родительского контроля снимает состояние и ждёт отпускания перед ответом: устаревший ответ. */
+        @Volatile var staleReadGate: java.util.concurrent.CountDownLatch? = null
+        @Volatile var staleReadTaken: java.util.concurrent.CountDownLatch? = null
         val steps = java.util.Collections.synchronizedList(mutableListOf<LoginStep>())
         val logouts = AtomicInteger()
         @Volatile var closed = false
@@ -57,7 +60,14 @@ class RouterViewModelTest {
         }
         override fun snapshot(): RouterSnapshot { if (closed) throw RouterException.SessionExpired; snapshotError?.let { throw it }; return demo.snapshot() }
         override fun wifiCredentials(network: WifiNetwork) = demo.wifiCredentials(network)
-        override fun parentalControl() = demo.parentalControl()
+        override fun parentalControl(): ParentalControl {
+            val pc = demo.parentalControl()
+            synchronized(this) { staleReadGate.also { staleReadGate = null } }?.let { gate ->
+                staleReadTaken?.countDown()
+                gate.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            }
+            return pc
+        }
         override fun setParentalEnabled(on: Boolean) = demo.setParentalEnabled(on)
         override fun setProfileEnabled(index: Int, on: Boolean) {
             writeGate?.await(5, java.util.concurrent.TimeUnit.SECONDS)
@@ -279,6 +289,9 @@ class RouterViewModelTest {
         router.loginGate!!.countDown()
     }
 
+    /** Две быстрые записи много раз подряд: их итоги возвращаются на главный поток в произвольном порядке. */
+    @Test fun rapidDoubleToggleEndsInLastState() { repeat(100) { router.writeGate = null; parentalSwitchShowsWriteInProgress() } }
+
     @Test fun parentalSwitchShowsWriteInProgress() {
         signIn()
         onMain { vm.load(Section.PARENTAL) }
@@ -290,6 +303,24 @@ class RouterViewModelTest {
         router.writeGate!!.countDown()
         waitFor("обе записи закончились") { it.writingParental.isEmpty() }
         assertEquals(p.enabled, vm.state.value.parental!!.profiles.first { it.index == p.index }.enabled)
+    }
+
+    /** Чтение вкладки шло во время записи и ответило позже неё: его ответ не должен затереть итог записи. */
+    @Test fun staleParentalReadDoesNotOverwriteWrite() {
+        signIn()
+        onMain { vm.load(Section.PARENTAL) }
+        waitFor("профили") { it.parental != null && Section.PARENTAL !in it.sectionsBusy }
+        val p = vm.state.value.parental!!.profiles.first()
+        val release = java.util.concurrent.CountDownLatch(1)
+        router.staleReadTaken = java.util.concurrent.CountDownLatch(1)
+        router.staleReadGate = release
+        onMain { vm.load(Section.PARENTAL) }
+        assertTrue("чтение началось", router.staleReadTaken!!.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        onMain { vm.setProfileEnabled(p.index, !p.enabled) }
+        waitFor("запись закончилась") { it.writingParental.isEmpty() && it.parental!!.profiles.first { x -> x.index == p.index }.enabled == !p.enabled }
+        release.countDown()
+        waitFor("устаревшее чтение закончилось") { Section.PARENTAL !in it.sectionsBusy }
+        assertEquals(!p.enabled, vm.state.value.parental!!.profiles.first { it.index == p.index }.enabled)
     }
 
     @Test fun routingReportsProgress() {

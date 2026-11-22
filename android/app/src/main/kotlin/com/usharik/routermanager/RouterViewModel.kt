@@ -130,6 +130,8 @@ class RouterViewModel(
     private var foreground = false
     private var rebootNoticeUntil = 0L
     private var parentalWrites = 0   // только с главного потока
+    /** Растёт при каждой записи родительского контроля: чтение, во время которого началась запись, устарело. Только с главного потока. */
+    private var parentalWriteSeq = 0
     /** Сколько записей ждёт каждый переключатель: две подряд не должны погасить индикатор после первой. Главный поток. */
     private val writing = mutableMapOf<Int, Int>()
     /** Номер попытки входа: отменённая попытка, вернувшись, не трогает экран. Главный поток. */
@@ -529,6 +531,7 @@ class RouterViewModel(
     fun load(section: Section, keepBanner: Boolean = false) {
         val c = client ?: return
         if (section == Section.PARENTAL && parentalWrites > 0) return   // запись сама перечитает состояние
+        val writeSeq = parentalWriteSeq
         session.launch {
             state.update {
                 it.copy(sectionsBusy = it.sectionsBusy + section, sectionErrors = it.sectionErrors - section, routingProgress = if (section == Section.ROUTING) 0 else it.routingProgress)
@@ -546,7 +549,9 @@ class RouterViewModel(
                     val banner = if (keepBanner) it.banner else bannerAfterRefresh(null, it.banner)
                     @Suppress("UNCHECKED_CAST")
                     when (section) {
-                        Section.PARENTAL -> it.copy(parental = if (parentalWrites == 0) result as ParentalControl else it.parental, banner = banner)
+                        // Чтение идёт мимо очереди записей: если запись началась, пока оно шло, ответ мог застать
+                        // промежуточное состояние (между двумя быстрыми переключениями) и затёр бы итог записи.
+                        Section.PARENTAL -> it.copy(parental = if (parentalWrites == 0 && parentalWriteSeq == writeSeq) result as ParentalControl else it.parental, banner = banner)
                         Section.ROUTING -> it.copy(routing = result as Routing, banner = banner)
                         Section.LOG -> it.copy(log = result as List<LogEntry>, banner = banner)
                     }
@@ -584,17 +589,21 @@ class RouterViewModel(
     private fun writeParental(key: Int, optimistic: (ParentalControl) -> ParentalControl, rollback: (ParentalControl) -> ParentalControl, op: (RouterApi) -> Unit) {
         val c = client ?: return
         writing[key] = (writing[key] ?: 0) + 1
+        parentalWriteSeq++
         state.update { it.copy(parental = it.parental?.let(optimistic), writingParental = writing.keys.toSet()) }
         parentalWrites++
         session.launch {
             try {
-                val pc = parentalQueue.withLock { recovering(c) { op(c); c.parentalControl() } }
-                parentalWrites--
-                writeError = null
+                // Итог записи учитывается внутри очереди: после её освобождения продолжения двух записей могут
+                // вернуться на главный поток в обратном порядке, и последним лёг бы ответ более ранней записи.
+                parentalQueue.withLock {
+                    val pc = try { recovering(c) { op(c); c.parentalControl() } } catch (e: RouterException) { parentalWrites--; throw e }
+                    parentalWrites--
+                    writeError = null
+                    if (parentalWrites == 0) state.update { it.copy(parental = pc, banner = bannerAfterRefresh(null, it.banner)) }
+                }
                 Telemetry.event("parental_toggled")
-                if (parentalWrites == 0) state.update { it.copy(parental = pc, banner = bannerAfterRefresh(null, it.banner)) }
             } catch (e: RouterException) {
-                parentalWrites--
                 if (sessionLost(e)) return@launch
                 writeError = text(e)
                 state.update { it.copy(parental = it.parental?.let(rollback), banner = text(e)) }
@@ -620,6 +629,7 @@ class RouterViewModel(
         if (state.value.saveState == SaveState.InFlight) return
         val c = client ?: return state.update { it.copy(saveState = SaveState.Failed(text(RouterException.SessionExpired))) }
         state.update { it.copy(saveState = SaveState.InFlight) }
+        parentalWriteSeq++
         val actionAt = actionStarted()
         session.launch {
             try {
@@ -645,6 +655,7 @@ class RouterViewModel(
         val c = client ?: return
         if (index in state.value.deletingProfiles) return
         state.update { it.copy(deletingProfiles = it.deletingProfiles + index) }
+        parentalWriteSeq++
         val actionAt = actionStarted()
         session.launch {
             try {
