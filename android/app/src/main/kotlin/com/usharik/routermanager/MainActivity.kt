@@ -115,7 +115,9 @@ internal fun fittedStyle(labels: List<String>, available: Dp, base: TextStyle): 
  */
 internal object ScreenshotMode { @Volatile var on = false }
 
-const val PRIVACY_POLICY_URL = "https://usharik.github.io/routermanager/privacy-policy.html"
+/** Политика конфиденциальности на usharik.dev на языке интерфейса (строка privacy_policy_url в values-*). */
+@Composable
+private fun privacyPolicyUrl() = stringResource(R.string.privacy_policy_url)
 
 class MainActivity : ComponentActivity() {
     private val viewModel: RouterViewModel by viewModels {
@@ -314,7 +316,8 @@ private fun LoginScreen(s: UiState, vm: RouterViewModel) {
         }
         // Посмотреть приложение без роутера; так же его проверяют в Google Play.
         TextButton(vm::startDemo, enabled = !s.busy) { Text(stringResource(R.string.demo_try)) }
-        TextButton({ runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, PRIVACY_POLICY_URL.toUri())) } }) {
+        val policyUrl = privacyPolicyUrl()
+        TextButton({ runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, policyUrl.toUri())) } }) {
             Text(stringResource(R.string.privacy_policy), style = MaterialTheme.typography.bodySmall)
         }
     } }
@@ -675,7 +678,8 @@ private fun AboutDialog(adFree: Boolean, offer: RemoveAdsOffer, restore: Restore
                     }
                 }
                 TextButton({ open("https://play.google.com/store/apps/details?id=${context.packageName}") }) { Text(stringResource(R.string.rate_app)) }
-                TextButton({ open(PRIVACY_POLICY_URL) }) { Text(stringResource(R.string.privacy_policy)) }
+                val policyUrl = privacyPolicyUrl()
+                TextButton({ open(policyUrl) }) { Text(stringResource(R.string.privacy_policy)) }
                 TextButton({ licenses = true }) { Text(stringResource(R.string.open_source_licenses)) }
             }
         },

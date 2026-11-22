@@ -72,6 +72,7 @@
     <string name="restore_purchase">Restore purchase</string>
     <string name="rate_app">Rate on Google Play</string>
     <string name="privacy_policy">Privacy policy</string>
+    <string name="privacy_policy_url">https://usharik.dev/apps/router-manager/privacy/</string>
     <string name="open_source_licenses">Open source licenses</string>
     <string name="label_guest">guest</string>
     <string name="label_blocked">blocked</string>

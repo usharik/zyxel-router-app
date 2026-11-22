@@ -72,6 +72,7 @@
     <string name="restore_purchase">Відновити покупку</string>
     <string name="rate_app">Оцінити в Google Play</string>
     <string name="privacy_policy">Політика конфіденційності</string>
+    <string name="privacy_policy_url">https://usharik.dev/apps/router-manager/privacy/uk/</string>
     <string name="open_source_licenses">Ліцензії відкритого ПЗ</string>
     <string name="label_guest">гість</string>
     <string name="label_blocked">заблок.</string>

@@ -72,6 +72,7 @@
     <string name="restore_purchase">Obnovit nákup</string>
     <string name="rate_app">Ohodnotit na Google Play</string>
     <string name="privacy_policy">Zásady ochrany soukromí</string>
+    <string name="privacy_policy_url">https://usharik.dev/cs/apps/router-manager/privacy/</string>
     <string name="open_source_licenses">Licence open source</string>
     <string name="label_guest">host</string>
     <string name="label_blocked">blok.</string>
