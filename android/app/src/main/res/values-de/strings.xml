@@ -72,6 +72,7 @@
     <string name="restore_purchase">Kauf wiederherstellen</string>
     <string name="rate_app">Bei Google Play bewerten</string>
     <string name="privacy_policy">Datenschutzerklärung</string>
+    <string name="open_source_licenses">Open-Source-Lizenzen</string>
     <string name="label_guest">Gast</string>
     <string name="label_blocked">gesperrt</string>
     <string name="type_phone">Smartphone oder Tablet</string>

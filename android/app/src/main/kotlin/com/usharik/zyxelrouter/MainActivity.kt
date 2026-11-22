@@ -79,7 +79,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 // Цвета состояний зависят от темы: один оттенок на светлом фоне даёт контраст ~3:1, на тёмном — ~5:1,
@@ -615,6 +617,7 @@ private fun AboutDialog(adFree: Boolean, offer: RemoveAdsOffer, restore: Restore
     fun open(url: String) = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     var reported by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { if (!reported) Telemetry.screen("about"); reported = true }
+    var licenses by rememberSaveable { mutableStateOf(false) }
     TrackOverlay()
     AlertDialog(
         onDismissRequest = onClose,
@@ -661,6 +664,27 @@ private fun AboutDialog(adFree: Boolean, offer: RemoveAdsOffer, restore: Restore
                 }
                 TextButton({ open("https://play.google.com/store/apps/details?id=${context.packageName}") }) { Text(stringResource(R.string.rate_app)) }
                 TextButton({ open(PRIVACY_POLICY_URL) }) { Text(stringResource(R.string.privacy_policy)) }
+                TextButton({ licenses = true }) { Text(stringResource(R.string.open_source_licenses)) }
+            }
+        },
+        confirmButton = { TextButton(onClose) { Text(stringResource(R.string.close)) } },
+    )
+    if (licenses) LicensesDialog { licenses = false }
+}
+
+/** Тексты лицензий библиотек: Apache 2.0 и MIT требуют прикладывать их к распространяемой сборке. */
+@Composable
+private fun LicensesDialog(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val text by produceState<String?>(null) {
+        value = withContext(Dispatchers.IO) { runCatching { context.assets.open("open_source_licenses.txt").bufferedReader().use { it.readText() } }.getOrDefault("") }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(stringResource(R.string.open_source_licenses)) },
+        text = {
+            Box(Modifier.fillMaxWidth().heightIn(min = 120.dp).verticalScroll(rememberScrollState())) {
+                text?.let { Text(it, style = MaterialTheme.typography.bodySmall) } ?: CircularProgressIndicator(Modifier.align(Alignment.Center))
             }
         },
         confirmButton = { TextButton(onClose) { Text(stringResource(R.string.close)) } },
