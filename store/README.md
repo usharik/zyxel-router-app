@@ -3,7 +3,7 @@
 ## Что сделать вручную (по порядку)
 
 1. **Название** выбрано: «Router Manager for Zyxel» (ru/uk «Менеджер роутера для Zyxel», cs «Správce routeru pro Zyxel», de «Router-Manager für Zyxel»). «Zyxel» стоит после «for», а в описании и в «О приложении» сказано, что приложение неофициальное, — так требуют правила Play о товарных знаках. Иконка своя, без логотипа Zyxel.
-2. **Firebase.** Создать проект (или добавить Android-приложение `com.usharik.zyxelrouter` в существующий), скачать `google-services.json` в `android/app/`. Файл в Git не попадает. Плагины Firebase и Crashlytics включатся сами. В Firebase → Analytics (GA4) → Data settings: выключить Google signals и персонализацию рекламы, проверить срок хранения данных (14 месяцев, как в политике).
+2. **Firebase.** Создать проект (или добавить Android-приложение `com.usharik.routermanager` в существующий), скачать `google-services.json` в `android/app/`. Файл в Git не попадает. Плагины Firebase и Crashlytics включатся сами. В Firebase → Analytics (GA4) → Data settings: выключить Google signals и персонализацию рекламы, проверить срок хранения данных (14 месяцев, как в политике).
 3. **AdMob** (аккаунт `pub-6420074467468909`): добавить приложение, создать блоки «Баннер» и «Межстраничное объявление», вписать идентификаторы в `android/app/src/release/res/values/ads.xml`. Пока там тестовые ID, release не соберётся без `-PallowTestAds`. Сообщение GDPR (Privacy & messaging → European regulations) создать для этого приложения и **опубликовать**, иначе форма согласия в ЕЭЗ не появится, а Firebase там не включится; при желании — ещё сообщение для штатов США (US state regulations). **До установки release с настоящими ID** зарегистрировать свои телефоны в AdMob как тестовые устройства (Settings → Test devices), иначе свои показы и клики могут засчитать как недействительный трафик. `app-ads.txt` уже лежит на usharik.github.io; в карточке Play указать сайт разработчика `https://usharik.github.io`.
 4. **Ключ загрузки:** `keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000`, затем `android/keystore.properties`:
    ```
@@ -15,7 +15,7 @@
    Ключ и пароли держать вне Git (уже в `.gitignore`), сделать резервную копию. Подпись приложения — Play App Signing.
 
    Release-сборка теперь **падает**, если нет `android/app/google-services.json`, `android/keystore.properties` или в `ads.xml` остались тестовые ID AdMob. Для локальной проверки без настоящих ID — флаг `-PallowTestAds` (такую сборку не загружать в Play).
-5. **Политика конфиденциальности:** вписать e-mail для связи вместо заглушки `TODO: contact e-mail` в разделе 9, затем опубликовать `store/privacy-policy.html` как `usharik.github.io/zyxelrouter/privacy-policy.html` (ссылка зашита в приложение, `PRIVACY_POLICY_URL`). Репозиторий `usharik/zyxel-router-app` должен быть публичным, иначе ссылка на GitHub Issues в политике не откроется.
+5. **Политика конфиденциальности:** e-mail для связи вписан (раздел 9). Опубликовать `store/privacy-policy.html` как `usharik.github.io/routermanager/privacy-policy.html` (ссылка зашита в приложение, `PRIVACY_POLICY_URL`). Репозиторий `usharik/zyxel-router-app` должен быть публичным, иначе ссылка на GitHub Issues в политике не откроется.
 6. **Play Console:** создать приложение, заполнить платёжный профиль продавца (Settings → Payments profile) и налоговые сведения: без них разовый товар `remove_ads` создать нельзя. Первая загрузка AAB (`cd android && ./gradlew :app:bundleRelease`), затем разовый товар `remove_ads`: в Console или `tools/play-remove-ads-product.rb 1.99` (нужен ключ сервисного аккаунта `android/play-api-key.json`). Товар появляется только после первой загрузки AAB.
 7. **Тестирование:** внутренний трек (`cd android && bundle exec fastlane internal`). Новым личным аккаунтам разработчика нужно закрытое тестирование: 12 тестировщиков в течение 14 дней до выхода в продакшн. В Settings → License testing добавить свои аккаунты и проверить покупку `remove_ads` тестовой картой и возврат денег (Order management → Refund с отзывом покупки: реклама должна вернуться).
 
@@ -59,8 +59,8 @@
 - Фикстуры в репозитории обезличены (MAC, IP из 198.51.100.0/24, имена `device-N`, SSID `Net-N`).
 - «О приложении» → «Лицензии открытого ПО»: текст `assets/open_source_licenses.txt` (Apache 2.0 и MIT требуют прикладывать лицензии к сборке). При добавлении библиотеки сверить список: `./gradlew :app:dependencies --configuration releaseRuntimeClasspath`.
 
-Остающиеся риски:
-- **Имя пакета `com.usharik.zyxelrouter`** содержит товарный знак, а после первой загрузки в Play его уже не сменить. Правила Play это прямо не запрещают, но при жалобе Zyxel пришлось бы выпускать новое приложение с потерей установок и отзывов. Сменить сейчас почти бесплатно: версия из Play всё равно не встанет поверх APK с Google Drive (другая подпись). Решение за владельцем.
+Остающиеся риски и решения:
+- Имя пакета `com.usharik.routermanager` выбрано без товарного знака (до 1.4 было `com.usharik.zyxelrouter`): после первой загрузки в Play его не сменить, а при жалобе Zyxel пришлось бы выпускать новое приложение. Установленные с Google Drive версии 1.x со старым именем обновиться до версии из Play не могут, их нужно удалить.
 - **Список моделей в описании** — номинативное использование, но 18 названий подряд Play может счесть спамом ключевыми словами. Если карточку отклонят — оставить 3–4 модели и «и другие роутеры Zyxel с тем же веб-интерфейсом».
 - Если Zyxel пришлёт жалобу через Play, ответ: приложение неофициальное, бренд используется только для указания совместимости, логотипов нет.
 
@@ -89,4 +89,4 @@
 - На реальном телефоне с Play Store: покупка `remove_ads` тестовым аккаунтом (License testing в Play Console), баннер исчезает, после переустановки покупка восстанавливается.
 - Форма согласия в ЕЭЗ и пункт меню «Настройки рекламы и конфиденциальности». В ЕЭЗ без согласия (цель 1) события в DebugView не приходят; после согласия приходят. С купленным `remove_ads` формы нет.
 - Демо-режим: кнопка на экране входа открывает приложение без сети и без роутера.
-- В Firebase DebugView приходят события (`adb shell setprop debug.firebase.analytics.app com.usharik.zyxelrouter`; в debug-сборке сбор выключен, проверять release или временно включить).
+- В Firebase DebugView приходят события (`adb shell setprop debug.firebase.analytics.app com.usharik.routermanager`; в debug-сборке сбор выключен, проверять release или временно включить).

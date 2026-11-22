@@ -4,11 +4,12 @@ import Security
 import SwiftUI
 
 enum Keychain {
-    private static func query(_ account: String) -> [CFString: Any] {
-        [kSecClass: kSecClassGenericPassword, kSecAttrService: "com.usharik.zyxelrouter", kSecAttrAccount: account]
+    static let service = "com.usharik.routermanager"
+    private static func query(_ account: String, service: String = service) -> [CFString: Any] {
+        [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account]
     }
-    static func read(_ account: String) -> String? {
-        var q = query(account)
+    static func read(_ account: String, service: String = service) -> String? {
+        var q = query(account, service: service)
         q[kSecReturnData] = true
         var out: CFTypeRef?
         guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
@@ -21,6 +22,25 @@ enum Keychain {
         SecItemAdd(q as CFDictionary, nil)
     }
     static func delete(_ account: String) { SecItemDelete(query(account) as CFDictionary) }
+}
+
+/// До 1.4 приложение называлось com.usharik.zyxelrouter (идентификатор, настройки и Связка ключей).
+/// Один раз переносит адрес, логин, историю устройств и сохранённый пароль под новое имя; старые записи не трогает,
+/// чтобы ими могла пользоваться ранее установленная диагностика.
+enum LegacyMigration {
+    static let oldId = "com.usharik.zyxelrouter"
+    private static let doneKey = "migratedFromZyxelrouter"
+
+    static func run(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: doneKey) else { return }
+        defer { defaults.set(true, forKey: doneKey) }
+        guard let old = defaults.persistentDomain(forName: oldId) else { return }
+        for (key, value) in old where defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
+        let account = defaults.string(forKey: "username") ?? "admin"
+        if Keychain.read(account) == nil, let password = Keychain.read(account, service: oldId) {
+            Keychain.save(password, account: account)
+        }
+    }
 }
 
 @MainActor

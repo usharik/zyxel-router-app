@@ -3,7 +3,7 @@
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Zyxel Router</string>
 <key>CFBundleDisplayName</key><string>Zyxel Router</string>
-<key>CFBundleIdentifier</key><string>com.usharik.zyxelrouter</string>
+<key>CFBundleIdentifier</key><string>com.usharik.routermanager</string>
 <key>CFBundleExecutable</key><string>ZyxelRouter</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>

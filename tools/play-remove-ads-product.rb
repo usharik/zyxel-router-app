@@ -11,7 +11,7 @@ require "googleauth"
 require "json"
 require "net/http"
 
-PACKAGE = "com.usharik.zyxelrouter"
+PACKAGE = "com.usharik.routermanager"
 PRODUCT_ID = "remove_ads" # keep in sync with REMOVE_ADS_PRODUCT_ID in the app
 PURCHASE_OPTION_ID = "lifetime"
 API = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/#{PACKAGE}"

@@ -9,9 +9,11 @@ import RouterKit
 signal(SIGPIPE, SIG_IGN)   // запись в stdin завершившегося curl не должна ронять процесс
 let env = ProcessInfo.processInfo.environment
 let args = CommandLine.arguments.dropFirst()
-let appDefaults = UserDefaults(suiteName: "com.usharik.zyxelrouter")
-let address = args.first(where: { !$0.hasPrefix("--") }) ?? appDefaults?.string(forKey: "address") ?? "192.168.1.1"
-let user = env["ROUTER_USER"] ?? appDefaults?.string(forKey: "username") ?? "admin"
+// Настройки приложения; до 1.4 оно называлось com.usharik.zyxelrouter.
+let appDefaults = ["com.usharik.routermanager", "com.usharik.zyxelrouter"].compactMap { UserDefaults(suiteName: $0) }
+func appSetting(_ key: String) -> String? { appDefaults.lazy.compactMap { $0.string(forKey: key) }.first }
+let address = args.first(where: { !$0.hasPrefix("--") }) ?? appSetting("address") ?? "192.168.1.1"
+let user = env["ROUTER_USER"] ?? appSetting("username") ?? "admin"
 let password = env["ROUTER_PASSWORD"] ?? ""
 let speedtest = !args.contains("--no-speedtest") && env["DIAG_SPEEDTEST"] != "0"
 let notify = !args.contains("--no-notify")

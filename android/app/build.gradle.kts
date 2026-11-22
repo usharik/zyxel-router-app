@@ -18,17 +18,17 @@ val signingPropertiesFile = rootProject.file("keystore.properties")
 if (signingPropertiesFile.exists()) signingPropertiesFile.inputStream().use(signingProperties::load)
 
 android {
-    namespace = "com.usharik.zyxelrouter"
+    namespace = "com.usharik.routermanager"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.usharik.zyxelrouter"
+        applicationId = "com.usharik.routermanager"
         minSdk = 29
         // Android 17 (target 37) requires a runtime local-network permission; target 36 keeps access to the router simple.
         // Google Play принимает target 36 для новых приложений и обновлений до 31.08.2027.
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.3.1"
+        versionCode = 7
+        versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {

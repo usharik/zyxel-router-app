@@ -1,2 +1,2 @@
 json_key_file(ENV["PLAY_STORE_JSON_KEY_PATH"] || File.expand_path("../play-api-key.json", __dir__))
-package_name("com.usharik.zyxelrouter")
+package_name("com.usharik.routermanager")

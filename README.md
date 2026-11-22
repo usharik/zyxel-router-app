@@ -73,7 +73,7 @@
 с «media» в имени; задаётся `MEDIA_MATCH`), проверяет round-trip и удаляет его — обратимо, ничего не блокирует.
 
 Запуск (пароль из Связки ключей, в вывод не попадает):
-`ROUTER_PASSWORD="$(security find-generic-password -s com.usharik.zyxelrouter -w)" macos/.build/debug/routercapture 192.168.1.1 --write-test`
+`ROUTER_PASSWORD="$(security find-generic-password -s com.usharik.routermanager -w)" macos/.build/debug/routercapture 192.168.1.1 --write-test`
 
 Что подтверждено на живом VMG8623-T50B:
 - Запись профиля роутер принимает в нашем формате: `Days` отправляется массивом, роутер хранит и возвращает
@@ -258,3 +258,12 @@ Release с R8 перед выпуском проверять вручную: `./
 
 Тесты: разбор `ping`/`dig`, оценка на реальных фикстурах (порт 10 Мбит/с, открытое управление, перезагрузка, новое устройство,
 падение DSL, байты WAN с PPP-интерфейса, дата журнала на стыке лет) — `swift run RouterKitTests`.
+
+## Версия 1.4: имя пакета без товарного знака
+
+- Android: `com.usharik.zyxelrouter` → **`com.usharik.routermanager`** (applicationId, namespace, пакеты Kotlin, Fastlane, `tools/play-remove-ads-product.rb`). После первой загрузки в Play имя пакета не меняется, а товарный знак в нём — риск при жалобе правообладателя. Версии 1.x с Google Drive обновиться до 1.4 не могут: это другое приложение, старое нужно удалить.
+- Политика конфиденциальности переезжает на `https://usharik.github.io/routermanager/privacy-policy.html` (`PRIVACY_POLICY_URL`); e-mail для связи вписан.
+- macOS: идентификатор, настройки и Связка ключей тоже `com.usharik.routermanager`. При первом запуске `LegacyMigration` переносит адрес, логин, историю устройств и сохранённый пароль со старого имени (macOS один раз спросит доступ к старой записи Связки ключей). `install_diagnostics.sh` снимает старое задание `com.usharik.zyxelrouter.diagnostics`, а обёртка `routerdiag` при пустых новых настройках читает старые.
+- «О приложении» → «Лицензии открытого ПО» (`assets/open_source_licenses.txt`).
+
+Проверено на живом VMG8623-T50B (2026-11-22): `routercapture` (чтение и обратимый тест записи профиля), `routerdiag` вручную и через launchd, Android debug и release с R8 на эмуляторе: вход, все вкладки, QR-код Wi-Fi.
