@@ -1,24 +1,90 @@
 default_platform(:android)
 
-platform :android do
-  desc "Тесты, подписанный AAB и загрузка во внутреннее тестирование Google Play"
-  lane :internal do
-    project_root = File.expand_path("..", __dir__)
-    key_path = ENV["PLAY_STORE_JSON_KEY_PATH"] || File.join(project_root, "play-api-key.json")
-    UI.user_error!("Нужен ключ сервисного аккаунта Play: PLAY_STORE_JSON_KEY_PATH или android/play-api-key.json") unless File.file?(key_path)
-    UI.user_error!("Нужен android/keystore.properties для подписи") unless File.file?(File.join(project_root, "keystore.properties"))
+# Запуск: cd android && bundle exec fastlane <дорожка>   (Ruby из mise.toml; первый раз: bundle install)
+# Нужно (всё вне Git): android/play-api-key.json (сервисный аккаунт Play с доступом к приложению),
+# android/keystore.properties (ключ загрузки), android/app/google-services.json.
+# Пока приложение не опубликовано, Play принимает выпуски только черновиками: RELEASE_STATUS=draft (по умолчанию).
 
-    gradle(project_dir: project_root, task: ":app:testDebugUnitTest :app:lintDebug")
-    gradle(project_dir: project_root, task: ":app:bundleRelease")   # упадёт, если в release тестовые ID AdMob
+ENV["LC_ALL"] ||= "en_US.UTF-8"
+ENV["LANG"] ||= "en_US.UTF-8"
+
+PROJECT_ROOT = File.expand_path("..", __dir__)
+AAB_PATH = File.join(PROJECT_ROOT, "app/build/outputs/bundle/release/app-release.aab")
+
+platform :android do
+  before_all do |lane|
+    key_path = ENV["PLAY_STORE_JSON_KEY_PATH"] || File.join(PROJECT_ROOT, "play-api-key.json")
+    UI.user_error!("Нужен ключ сервисного аккаунта Play: PLAY_STORE_JSON_KEY_PATH или android/play-api-key.json") unless File.file?(key_path)
+  end
+
+  desc "Проверить ключ Play API и доступ к приложению"
+  lane :check_access do
+    validate_play_store_json_key
+    tracks = google_play_track_version_codes(track: "internal") rescue nil
+    UI.success(tracks ? "Доступ к приложению есть; internal: #{tracks.inspect}" : "Ключ рабочий, но доступа к приложению нет (Play Console → Пользователи и разрешения)")
+  end
+
+  desc "Тесты и подписанный AAB (без загрузки)"
+  lane :build do
+    UI.user_error!("Нужен android/keystore.properties для подписи") unless File.file?(File.join(PROJECT_ROOT, "keystore.properties"))
+    gradle(project_dir: PROJECT_ROOT, task: ":app:testDebugUnitTest :app:lintDebug")
+    gradle(project_dir: PROJECT_ROOT, task: ":app:bundleRelease")   # упадёт, если release не готов (checkReleaseConfig)
+  end
+
+  desc "Сборка и загрузка во внутреннее тестирование"
+  lane :internal do
+    build
+    upload_aab(track: "internal")
+  end
+
+  desc "Сборка и загрузка в закрытое тестирование (alpha): нужно 12 тестировщиков на 14 дней перед продакшном"
+  lane :closed do
+    build
+    upload_aab(track: "alpha")
+  end
+
+  desc "Перенести выпуск между треками без новой сборки: from:internal to:alpha|production"
+  lane :promote do |options|
+    from = options[:from] || "internal"
+    to = options[:to] || "alpha"
     upload_to_play_store(
-      track: "internal",
-      aab: File.join(project_root, "app/build/outputs/bundle/release/app-release.aab"),
-      release_status: "draft",
+      track: from, track_promote_to: to, release_status: release_status,
+      skip_upload_aab: true, skip_upload_apk: true, skip_upload_metadata: true,
+      skip_upload_changelogs: true, skip_upload_images: true, skip_upload_screenshots: true,
+    )
+  end
+
+  desc "Тексты карточки, значок, обложка и скриншоты из fastlane/metadata (без сборки)"
+  lane :metadata do
+    # supply привязывает правку карточки к выпуску: берём последний выпуск внутреннего тестирования.
+    version_code = google_play_track_version_codes(track: "internal").max
+    UI.user_error!("Сначала загрузите сборку: fastlane internal") unless version_code
+    upload_to_play_store(
+      track: "internal", version_code: version_code, release_status: release_status,
+      skip_upload_aab: true, skip_upload_apk: true, skip_upload_changelogs: true,
+      sync_image_upload: true,   # одинаковые картинки повторно не загружаются
+    )
+  end
+
+  desc "Разовая покупка remove_ads (после первой загрузки AAB): fastlane product price:1.99"
+  lane :product do |options|
+    sh("ruby", File.join(PROJECT_ROOT, "..", "tools", "play-remove-ads-product.rb"), (options[:price] || "1.99").to_s)
+  end
+
+  private_lane :upload_aab do |options|
+    upload_to_play_store(
+      track: options[:track],
+      aab: AAB_PATH,
+      release_status: release_status,
       skip_upload_apk: true,
       skip_upload_metadata: true,
-      skip_upload_changelogs: true,
       skip_upload_images: true,
       skip_upload_screenshots: true,
+      skip_upload_changelogs: !File.directory?(File.join(__dir__, "metadata/android/en-US/changelogs")),
     )
+  end
+
+  def release_status
+    ENV["RELEASE_STATUS"] || "draft"
   end
 end

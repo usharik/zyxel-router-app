@@ -1,6 +1,38 @@
 # Публикация в Google Play
 
-## Что сделать вручную (по порядку)
+## Состояние на 22.11.2026
+
+Сделано:
+- Приложение создано в Play Console; сборка 1.4.0 (versionCode 7) загружена во **внутреннее тестирование черновиком**.
+- Карточка загружена через Fastlane на 5 языках: тексты, значок 512×512, обложка 1024×500, по 5 скриншотов.
+- Разовая покупка `remove_ads` создана и активирована: базовая цена 1,99 USD, 174 региона.
+- Firebase: `android/app/google-services.json` (проект `router-manager-for-zyxel`). AdMob: приложение `ca-app-pub-6420074467468909~9463913628`, баннер `…/8215953120`. Межстраничного блока нет: пустой ID в `ads.xml` выключает полноэкранную рекламу.
+- Ключ загрузки: `~/dev/keys/routermanager-upload.jks`, пароль в `~/dev/keys/routermanager-upload.txt` (SHA-256 `27:8D:05:E0:…:CF:A0`). **Сделать резервную копию** вне этого Mac.
+- Политика конфиденциальности опубликована: https://usharik.github.io/routermanager/privacy-policy.html (репозиторий `~/dev/usharik.github.io`).
+- Ключ Play API: общий сервисный аккаунт `github-play@…` (`android/play-api-key.json`, копия `pc-api-key.json` из других проектов).
+
+Осталось (только в консолях, руками):
+1. **AdMob → Privacy & messaging:** создать и опубликовать сообщение GDPR для этого приложения. Сейчас UMP отвечает «no form(s) configured for the input app ID»: в ЕЭЗ не будет формы согласия, Firebase там не включится, реклама будет только неперсонализированной.
+2. AdMob: зарегистрировать свои телефоны как тестовые устройства (Settings → Test devices).
+3. Play Console → App content: анкеты (ответы ниже, раздел Data safety и п. 8), категория «Инструменты», контакты, сайт `https://usharik.github.io`.
+4. Внутреннее тестирование: добавить тестировщиков и выпустить черновик (Release → Internal testing → Edit release → Review → Start rollout). License testing — свои аккаунты, проверить покупку и возврат.
+5. Закрытое тестирование: 12 тестировщиков на 14 дней (`fastlane promote from:internal to:alpha`), затем заявка на продакшн.
+
+## Как выпускать версию
+
+```
+cd android
+bundle install                     # один раз (Ruby из mise.toml, гемы в vendor/bundle)
+bundle exec fastlane check_access  # ключ Play API и доступ к приложению
+bundle exec fastlane internal      # тесты, lint, подписанный AAB → внутреннее тестирование (черновик)
+bundle exec fastlane closed        # то же в закрытое тестирование (alpha)
+bundle exec fastlane promote from:internal to:production
+bundle exec fastlane metadata      # тексты и графика карточки из fastlane/metadata
+```
+Перед новой версией поднять `versionCode`/`versionName` в `android/app/build.gradle.kts`. Пока приложение не опубликовано, Play принимает только черновики (по умолчанию `RELEASE_STATUS=draft`); после публикации — `RELEASE_STATUS=completed`.
+Графика: `swift tools/store_graphics.swift` (значок и обложка), `ANDROID_SERIAL=emulator-5600 python3 tools/store_screenshots.py` (скриншоты демо-режима без рекламы; нужна debug-сборка на эмуляторе).
+
+## Что сделать вручную (по порядку, исходный план)
 
 1. **Название** выбрано: «Router Manager for Zyxel» (ru/uk «Менеджер роутера для Zyxel», cs «Správce routeru pro Zyxel», de «Router-Manager für Zyxel»). «Zyxel» стоит после «for», а в описании и в «О приложении» сказано, что приложение неофициальное, — так требуют правила Play о товарных знаках. Иконка своя, без логотипа Zyxel.
 2. **Firebase.** Создать проект (или добавить Android-приложение `com.usharik.routermanager` в существующий), скачать `google-services.json` в `android/app/`. Файл в Git не попадает. Плагины Firebase и Crashlytics включатся сами. В Firebase → Analytics (GA4) → Data settings: выключить Google signals и персонализацию рекламы, проверить срок хранения данных (14 месяцев, как в политике).

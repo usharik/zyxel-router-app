@@ -27,3 +27,7 @@ android/play-api-key.json
 android/fastlane/report.xml
 android/fastlane/README.md
 android/.kotlin/
+
+# fastlane (bundle install --path vendor/bundle)
+android/vendor/
+android/.bundle/

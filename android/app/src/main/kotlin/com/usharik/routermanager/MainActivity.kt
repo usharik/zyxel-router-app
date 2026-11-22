@@ -109,6 +109,12 @@ internal fun fittedStyle(labels: List<String>, available: Dp, base: TextStyle): 
     return style
 }
 
+/**
+ * Съёмка скриншотов для Google Play (`tools/store_screenshots.sh`): только в debug-сборке
+ * `am start … --ez screenshots true` убирает с экранов рекламу и предложения её отключить.
+ */
+internal object ScreenshotMode { @Volatile var on = false }
+
 const val PRIVACY_POLICY_URL = "https://usharik.github.io/routermanager/privacy-policy.html"
 
 class MainActivity : ComponentActivity() {
@@ -119,6 +125,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (BuildConfig.DEBUG && intent.getBooleanExtra("screenshots", false)) ScreenshotMode.on = true
         val ads = (application as ZyxelApp).ads
         ads.start(this)
         setContent {
@@ -343,7 +350,8 @@ private fun MainScreen(s: UiState, vm: RouterViewModel, ads: AdsController) {
     var confirm by rememberSaveable { mutableStateOf(false) }
     var about by rememberSaveable { mutableStateOf(false) }
     val activity = LocalActivity.current
-    val adFree by ads.purchases.adFree.collectAsStateWithLifecycle()
+    val purchasedAdFree by ads.purchases.adFree.collectAsStateWithLifecycle()
+    val adFree = purchasedAdFree || ScreenshotMode.on
     val offer by ads.purchases.offer.collectAsStateWithLifecycle()
     val pacing by ads.pacing.state.collectAsStateWithLifecycle()
     val adsActive = ads.active(adFree)

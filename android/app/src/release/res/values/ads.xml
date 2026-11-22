@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  TODO перед публикацией: создать приложение и два рекламных блока в AdMob (аккаунт pub-6420074467468909)
-  и вписать сюда их идентификаторы. Пока стоят тестовые: задача checkReleaseConfig не даст собрать с ними release
-  без -PallowTestAds.
+  Идентификаторы AdMob для release (аккаунт pub-6420074467468909, приложение «Router Manager for Zyxel»).
+  Межстраничного блока пока нет: пустой admob_interstitial_ad_unit_id выключает полноэкранную рекламу, остаётся баннер.
+  Чтобы включить её, создать в AdMob блок «Межстраничное объявление» и вписать сюда его идентификатор.
 -->
 <resources>
-    <string name="admob_app_id" translatable="false">ca-app-pub-3940256099942544~3347511713</string>
-    <string name="admob_banner_ad_unit_id" translatable="false">ca-app-pub-3940256099942544/9214589741</string>
-    <string name="admob_interstitial_ad_unit_id" translatable="false">ca-app-pub-3940256099942544/1033173712</string>
+    <string name="admob_app_id" translatable="false">ca-app-pub-6420074467468909~9463913628</string>
+    <string name="admob_banner_ad_unit_id" translatable="false">ca-app-pub-6420074467468909/8215953120</string>
+    <string name="admob_interstitial_ad_unit_id" translatable="false"></string>
 </resources>

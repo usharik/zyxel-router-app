@@ -325,7 +325,10 @@ private class BannerRetry {
     private companion object { val DELAYS_MS = longArrayOf(3_000, 10_000, 30_000, 60_000, 120_000) }
 }
 
-/** Полноэкранная реклама: загружается заранее, показывается только готовая — пользователь её никогда не ждёт. */
+/**
+ * Полноэкранная реклама: загружается заранее, показывается только готовая — пользователь её никогда не ждёт.
+ * Пустой идентификатор блока в ads.xml выключает её: тогда в приложении только баннер.
+ */
 private class Interstitial(private val app: Application, private val onShown: () -> Unit) {
     private val adUnitId = app.getString(R.string.admob_interstitial_ad_unit_id)
     private var ad: InterstitialAd? = null
@@ -333,6 +336,7 @@ private class Interstitial(private val app: Application, private val onShown: ()
     private var loading = false
 
     fun preload() {
+        if (adUnitId.isBlank()) return
         if (ad != null && SystemClock.elapsedRealtime() - loadedAt > MAX_AGE_MS) ad = null
         if (ad != null || loading) return
         loading = true
