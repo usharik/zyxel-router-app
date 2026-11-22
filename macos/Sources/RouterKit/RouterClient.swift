@@ -274,6 +274,18 @@ public actor RouterClient {
         return parseLog(raw)
     }
 
+    /// Статистика линии со страницы «xDSL Statistics» (только чтение). Не DSL или другая прошивка — nil, это не ошибка.
+    public func lineStats() async throws -> LineStats? {
+        do {
+            let raw = try await rawGet("/cgi-bin/xDSLStatistics_handle?line=0")
+            return parseLineStats(lineStatsText(raw), now: Int(Date().timeIntervalSince1970))
+        } catch RouterError.sessionExpired {
+            throw RouterError.sessionExpired
+        } catch {
+            return nil
+        }
+    }
+
     public func routing() async throws -> Routing {
         parseRouting(
             static: try await dalObjects("static_route"), dns: try await dalObjects("dns_route"),

@@ -72,6 +72,8 @@ data class UiState(
     val parental: ParentalControl? = null,
     val routing: Routing? = null,
     val log: List<LogEntry>? = null,
+    /** Обрывы связи с провайдером, от новых к старым: из журнала роутера плюс локальная история (журнал короткий). */
+    val drops: List<ConnectionDrop> = emptyList(),
     /** Ошибка чтения раздела: экран показывает её с кнопкой «Повторить» вместо бесконечного индикатора. */
     val sectionErrors: Map<Section, String> = emptyMap(),
     /** Разделы, которые сейчас читаются; у каждого своя занятость, чтобы ответ одного не гасил индикатор другого. */
@@ -95,6 +97,11 @@ data class UiState(
  * Состояние экранов и сессия с роутером. [connect] создаёт клиента по адресу; в тестах — подставной [RouterApi].
  */
 private const val REBOOT_WAIT_MS = 180_000L
+/**
+ * Как часто журнал перечитывается в фоне, пока приложение на экране: буфер журнала роутера — несколько часов, и
+ * обрыв, не попавший в локальную историю, теряется. Раз в 5 минут — два запроса, на фоне опроса каждые 15 секунд незаметно.
+ */
+internal const val LOG_POLL_MS = 5 * 60_000L
 
 class RouterViewModel(
     app: Application,
@@ -204,6 +211,51 @@ class RouterViewModel(
     }
 
     private var lastSavedHistory: String? = null
+
+    // Локальная история обрывов связи (см. ConnectionDrops.kt). В демо-режиме живёт только в памяти.
+    private var dropLog = DropLog()
+    private var dropKey = ""
+    private var lastLogRead = 0L
+
+    private fun dropsKey(address: String) = "drops:" + address.trim()
+
+    /** Журнал и состояние линии одним заходом; линию отдают не все роутеры, её отсутствие — не ошибка. */
+    private fun readLog(c: RouterApi): Pair<List<LogEntry>, LineStats?> {
+        val log = c.systemLog()
+        val line = try { c.lineStats() } catch (e: RouterException.SessionExpired) { throw e } catch (_: RouterException) { null }
+        return log to line
+    }
+
+    /** Новое чтение журнала: обрывы из него сливаются с историей, история сохраняется, если изменилась. */
+    private fun applyLog(log: List<LogEntry>, line: LineStats?) {
+        val s = state.value
+        val now = System.currentTimeMillis() / 1000
+        // Снимок мог быть снят до 15 секунд назад: времена работы приводятся к текущему моменту.
+        val age = (now - s.updatedAt / 1000).coerceAtLeast(0)
+        val link = s.snapshot?.let { LinkStatus(it.uptime + age, it.internetUp, if (it.internetUp) it.internetUptime + age else 0, it.encapsulation.startsWith("PPP"), line) }
+        val before = dropLog
+        dropLog = before.record(log, link, now)
+        if (!s.demo && dropLog != before) {
+            val key = dropKey
+            val json = dropLog.toJson()
+            viewModelScope.launch(Dispatchers.IO) { devPrefs.edit().putString(key, json).apply() }
+            val added = dropLog.drops.size - before.drops.size
+            // Только число: времени, адресов и строк журнала в событии нет.
+            if (added > 0) Telemetry.event("connection_drops_found", mapOf("new" to added, "stored" to dropLog.drops.size))
+        }
+        state.update { it.copy(log = log, drops = dropLog.drops.asReversed()) }
+    }
+
+    /** Фоновое чтение журнала. Ошибки не показываются и вход не повторяется: сессией занимается опрос снимка. */
+    private suspend fun pollLog() {
+        val c = client ?: return
+        lastLogRead = System.currentTimeMillis()
+        try {
+            val (log, line) = withContext(Dispatchers.IO) { readLog(c) }
+            if (client === c) applyLog(log, line)
+        } catch (_: RouterException) {
+        }
+    }
 
     /** Пишет историю на диск в фоне и только если она изменилась: опрос идёт каждые 15 секунд. */
     private fun persistHistory(json: String?) {
@@ -410,10 +462,13 @@ class RouterViewModel(
         client = c
         discoveredThisSession = false
         val identities = if (demo) emptyMap() else identitiesFromJson(devPrefs.getString(identitiesKey(state.value.address), null))
+        dropKey = dropsKey(state.value.address)
+        dropLog = if (demo) DropLog() else DropLog.fromJson(devPrefs.getString(dropKey, null))
+        lastLogRead = 0
         state.update {
             it.copy(
                 phase = Phase.MAIN, demo = demo, busy = false, loginStep = null, banner = null, identities = identities, discovery = DiscoveryStatus.Idle, knownRouter = !demo || it.knownRouter,
-                parental = null, routing = null, log = null, sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false,
+                parental = null, routing = null, log = null, drops = dropLog.drops.asReversed(), sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false,
                 sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), refreshing = false,
             )
         }
@@ -457,7 +512,7 @@ class RouterViewModel(
         // Сбрасываем данные другого роутера, чтобы после перелогина не мелькали чужие профили/маршруты.
         state.update {
             it.copy(
-                phase = Phase.LOGIN, snapshot = null, devices = emptyList(), identities = emptyMap(), discovery = DiscoveryStatus.Idle, parental = null, routing = null, log = null, sectionErrors = emptyMap(),
+                phase = Phase.LOGIN, snapshot = null, devices = emptyList(), identities = emptyMap(), discovery = DiscoveryStatus.Idle, parental = null, routing = null, log = null, drops = emptyList(), sectionErrors = emptyMap(),
                 error = text(e), busy = false, loginStep = null, saveState = SaveState.Idle, rebooting = false, demo = false,
                 sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), refreshing = false,
                 certificateFingerprint = (e as? RouterException.CertificateChanged)?.fingerprint,
@@ -482,6 +537,7 @@ class RouterViewModel(
             while (isActive) {
                 delay(15_000)
                 refresh()
+                if (System.currentTimeMillis() - lastLogRead >= LOG_POLL_MS) pollLog()
             }
         }
     }
@@ -532,6 +588,7 @@ class RouterViewModel(
         val c = client ?: return
         if (section == Section.PARENTAL && parentalWrites > 0) return   // запись сама перечитает состояние
         val writeSeq = parentalWriteSeq
+        if (section == Section.LOG) lastLogRead = System.currentTimeMillis()
         session.launch {
             state.update {
                 it.copy(sectionsBusy = it.sectionsBusy + section, sectionErrors = it.sectionErrors - section, routingProgress = if (section == Section.ROUTING) 0 else it.routingProgress)
@@ -541,10 +598,12 @@ class RouterViewModel(
                     when (section) {
                         Section.PARENTAL -> c.parentalControl()
                         Section.ROUTING -> c.routing { done -> if (client === c) state.update { it.copy(routingProgress = done) } }
-                        Section.LOG -> c.systemLog()
+                        Section.LOG -> readLog(c)
                     }
                 }
                 if (client !== c) return@launch
+                @Suppress("UNCHECKED_CAST")
+                if (section == Section.LOG) (result as Pair<List<LogEntry>, LineStats?>).let { applyLog(it.first, it.second) }
                 state.update {
                     val banner = if (keepBanner) it.banner else bannerAfterRefresh(null, it.banner)
                     @Suppress("UNCHECKED_CAST")
@@ -553,7 +612,7 @@ class RouterViewModel(
                         // промежуточное состояние (между двумя быстрыми переключениями) и затёр бы итог записи.
                         Section.PARENTAL -> it.copy(parental = if (parentalWrites == 0 && parentalWriteSeq == writeSeq) result as ParentalControl else it.parental, banner = banner)
                         Section.ROUTING -> it.copy(routing = result as Routing, banner = banner)
-                        Section.LOG -> it.copy(log = result as List<LogEntry>, banner = banner)
+                        Section.LOG -> it.copy(banner = banner)
                     }
                 }
             } catch (e: RouterException) {
@@ -709,7 +768,7 @@ class RouterViewModel(
         state.update {
             it.copy(
                 phase = Phase.LOGIN, password = if (s.demo) it.password else "", snapshot = null, devices = emptyList(), identities = emptyMap(), discovery = DiscoveryStatus.Idle, parental = null, routing = null,
-                log = null, sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false, banner = null, error = null, demo = false,
+                log = null, drops = emptyList(), sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false, banner = null, error = null, demo = false,
                 sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), refreshing = false,
             )
         }

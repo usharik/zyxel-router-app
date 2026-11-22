@@ -109,8 +109,25 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
           '[dhcpc] Nov  7 09:00:00 daemon.debug udhcpc: sending renew',
           '[kernel] Nov  7 08:00:00 kern.warning kernel: wlan0 rate limited',
           '[firewall] Oct 31 23:00:00 daemon.notice firewall: dropped inbound',
+          // Обрыв связи в формулировках настоящего VMG8623-T50B: сессия PPP упала, через 40 секунд связь вернулась.
+          '[pppoe] Nov  9 03:10:00 daemon.info pppd: Connect time 1440.0 minutes.',
+          '[pppoe] Nov  9 03:10:00 daemon.notice pppd: Json PPP {    "ip": "203.0.113.7",    "linkname": "pppd3",    "type": "ipv4",    "state": "down"  }',
+          '[system] Nov  9 03:10:02 user.notice zcmdModuleCfg: System: Wan interface VDSL connection lost',
+          '[system] Nov  9 03:10:40 user.notice zcmdModuleCfg: System: Wan interface VDSL connection ready',
         ];
         return send(200, aesEnc(JSON.stringify([{ Iid: [1, 0, 0, 0, 0, 0], Oid: 'RDM_OID_LOG_CLASSIFY', result: lines }]), session.aes));
+      }
+      // Статистика линии DSL: как у настоящего роутера, текст в поле result.
+      if (url.startsWith('/cgi-bin/xDSLStatistics_handle')) {
+        if (test.status.xdsl) return send(test.status.xdsl, { result: 'ZCFG_NO_SUCH_OBJECT' });
+        const text = [
+          '       Line State:      Up', '       Modulation:      ITU G.993.5(G.Vectoring),G.998.4(G.INP)',
+          'near-end interleaved channel bit rate: 98304 kbps', 'near-end fast channel bit rate: 0 kbps',
+          'far-end interleaved channel bit rate: 0 kbps', 'far-end fast channel bit rate: 20480 kbps',
+          'near-end CRC error interleaved: 45', 'far-end FEC error fast: 3449', 'DSL uptime :14 days,  5:15, 21 secs',
+          'noise margin downstream: 6.3 dB', 'attenuation downstream: 9.7 dB', 'noise margin upstream: 7.5 dB', '',
+        ].join('\n');
+        return send(200, aesEnc(JSON.stringify([{ result: text }]), session.aes));
       }
       if (req.url === '/cgi-bin/DAL?oid=cardpage_status') return send(200, aesEnc(JSON.stringify(status), session.aes));
       if (req.url === '/cgi-bin/DAL?oid=lanhosts') return send(200, aesEnc(JSON.stringify(hosts), session.aes));

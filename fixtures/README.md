@@ -9,5 +9,9 @@
   Подтверждает реальный формат: `Days` возвращается СТРОКОЙ ("Mon"), `MACAddressList` с двоеточиями,
   `TimeRangeList` вида "09:00-10:00", роутер сам добавляет `ScheduleRuleList`. Предел профилей = 12.
 - `rip.json` (5 интерфейсов), пустые `static_route`/`dns_route`/`policy_route`.
+- `syslog_drops.json` — системный журнал целиком (597 строк примерно за 3 часа, снят 2026-11-22 в 19:15) с обрывом связи
+  17:14:58–17:16:58; `xdsl_statistics.json` — ответ `/cgi-bin/xDSLStatistics_handle?line=0` в тот же момент.
+  В строках журнала MAC, IPv4, IPv6 и имена хостов заменены тем же способом (`14:33:75:00:00:NN`, `198.51.100.N`,
+  `2001:db8::N`, `device-N`).
 
 Копии нужных файлов лежат в `android/app/src/test/resources/real/` для JVM-тестов.

@@ -139,4 +139,34 @@ class DialogsTest {
         rule.onNodeWithText("Apple iPhone").assertIsDisplayed()
         rule.onNodeWithText("AirPlay, " + string(R.string.service_apple)).assertIsDisplayed()
     }
+
+    @Test fun dropDetailsShowEverythingKnown() {
+        val zone = java.time.ZoneId.systemDefault()
+        val lost = java.time.LocalDateTime.of(2026, 11, 22, 17, 14, 58).atZone(zone).toEpochSecond()
+        val line = LineStats(lost + 7200, true, "VDSL2", 184_364, 55_613, 6.3, 7.5, 9.7, 1.9, 12.3, 7.5, 45, 0, 17_390_643, 3449, 1_228_521)
+        val d = ConnectionDrop(
+            lost, lost + 120, kind = DropKind.PPP_SESSION, iface = "VDSL", flaps = 3, sessionMinutes = 20355, lineHeld = true,
+            lines = listOf("[system] Nov 22 17:16:08 user.notice zcmdModuleCfg: System: Wan interface VDSL connection lost"), line = line, crcDelta = 5, crcSince = lost - 600,
+        )
+        rule.setContent { CompositionLocalProvider(LocalUiActivity provides ui) { MaterialTheme { DropDetailsDialog(d, latest = true) {} } } }
+        rule.onNodeWithText(string(R.string.drop_kind_ppp)).assertIsDisplayed()
+        rule.onNodeWithText("17:14:58", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("17:16:58", substring = true).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.duration_ms, 2, 0)).assertIsDisplayed()
+        rule.onNodeWithText("VDSL").assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.drop_cause_none)).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.drop_line_held)).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.duration_dhm, 14, 3, 15)).assertExists()
+        rule.onNodeWithText(string(R.string.value_pair_db, "6.3", "7.5")).assertExists()
+        rule.onNodeWithText(string(R.string.value_pair, "45", "0")).assertExists()
+        rule.onNodeWithText("5").assertExists()
+        rule.onNodeWithText(d.lines.single()).assertExists()
+    }
+
+    @Test fun inferredDropSaysItsTimeIsEstimated() {
+        val d = ConnectionDrop(null, 1_795_000_000, restoredInferred = true, kind = DropKind.PPP_SESSION)
+        rule.setContent { CompositionLocalProvider(LocalUiActivity provides ui) { MaterialTheme { DropDetailsDialog(d, latest = true) {} } } }
+        rule.onNodeWithText(string(R.string.drop_approx_hint)).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.drop_not_logged)).assertIsDisplayed()
+    }
 }

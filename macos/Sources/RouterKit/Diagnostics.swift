@@ -79,10 +79,11 @@ public struct RouterDiagInput {
     public var parental: ParentalControl?
     public var systemLog: [LogEntry]
     public var securityLog: [LogEntry]
+    public var line: LineStats?            // xDSL Statistics; nil, если роутер не отдаёт
     public init(status: [String: Any], hosts: [String: Any], traffic: [String: Any], mgmt: [[String: Any]], firewall: [String: Any],
-                time: [String: Any], parental: ParentalControl?, systemLog: [LogEntry], securityLog: [LogEntry]) {
+                time: [String: Any], parental: ParentalControl?, systemLog: [LogEntry], securityLog: [LogEntry], line: LineStats? = nil) {
         self.status = status; self.hosts = hosts; self.traffic = traffic; self.mgmt = mgmt; self.firewall = firewall
-        self.time = time; self.parental = parental; self.systemLog = systemLog; self.securityLog = securityLog
+        self.time = time; self.parental = parental; self.systemLog = systemLog; self.securityLog = securityLog; self.line = line
     }
 }
 
@@ -98,6 +99,11 @@ public struct DiagReport {
     public var sections: [(title: String, rows: [(String, String)])] = []
     public var metrics = DiagMetrics()
     public var knownDevices: [String: KnownDevice] = [:]
+    /// История обрывов связи после этого запуска (сохраняется в drops.json) и те, что найдены впервые.
+    public var drops = DropLog()
+    public var newDrops: [ConnectionDrop] = []
+    /// Раздел «Обрывы связи» — готовая разметка: таблица обрывов не укладывается в «показатель — значение».
+    public var dropsMarkdown = ""
     public var level: DiagLevel { findings.map(\.level).max() ?? .ok }
     public init(date: Date) { self.date = date }
 }
@@ -164,8 +170,9 @@ func attackType(_ message: String) -> String {
 /// Собирает отчёт. `router == nil` — роутер недоступен или вход не удался (`routerError` поясняет).
 /// `history` — прошлые запуски, от старых к новым.
 public func diagnose(router: RouterDiagInput?, routerError: String?, local: LocalProbe, history: [DiagMetrics],
-                     knownDevices: [String: KnownDevice], routerAddress: String, now: Date) -> DiagReport {
+                     knownDevices: [String: KnownDevice], routerAddress: String, now: Date, drops: DropLog = DropLog()) -> DiagReport {
     var r = DiagReport(date: now)
+    r.drops = drops
     r.metrics.date = now.timeIntervalSince1970
     r.metrics.local = local
     r.knownDevices = knownDevices
@@ -175,6 +182,7 @@ public func diagnose(router: RouterDiagInput?, routerError: String?, local: Loca
     evaluateLocal(&r, local: local, routerAddress: routerAddress)
     guard let router else {
         r.findings.append(DiagFinding(.crit, "Роутер", "Данные роутера не получены: \(routerError ?? "неизвестная ошибка")."))
+        if !r.drops.drops.isEmpty { r.dropsMarkdown = renderDrops(r.drops, now: Int(now.timeIntervalSince1970)) }   // история видна и без роутера
         return r
     }
     r.metrics.routerReachable = true
@@ -259,14 +267,7 @@ private func evaluateRouter(_ r: inout DiagReport, _ input: RouterDiagInput, pre
         ("Сессия WAN", formatDuration(snap.internetUptime)),
     ]
     if !snap.internetUp { r.findings.append(DiagFinding(.crit, "Интернет", "Роутер сообщает, что WAN-подключение не установлено.")) }
-    else {
-        let sinceBootGap = snap.uptime - snap.internetUptime
-        if let elapsed, !rebooted, snap.internetUptime + 60 < elapsed {
-            r.findings.append(DiagFinding(.warn, "Интернет", "С прошлой проверки соединение с провайдером переподключалось (текущая сессия \(formatDuration(snap.internetUptime)))."))
-        } else if !rebooted, sinceBootGap > 600, snap.internetUptime < 86400 {
-            r.findings.append(DiagFinding(.info, "Интернет", "Сессия WAN моложе работы роутера на \(formatDuration(sinceBootGap)) — было переподключение."))
-        }
-    }
+    // Переподключения (сессия WAN моложе работы роутера) учитываются как обрывы связи — см. evaluateDrops.
     let traffic = input.traffic
     let ip = Field.list(traffic["ipIface"]), ipSt = Field.list(traffic["ipIfaceSt"])
     let ppp = Field.list(traffic["pppIface"]), pppSt = Field.list(traffic["pppIfaceSt"])
@@ -449,10 +450,10 @@ private func evaluateRouter(_ r: inout DiagReport, _ input: RouterDiagInput, pre
     if !critical.isEmpty {
         r.findings.append(DiagFinding(.warn, "Журнал", "Критические записи в журнале за сутки: \(critical.count) (\(logCountsBy(critical) { $0.process }.prefix(3).map(\.label).joined(separator: ", ")))."))
     }
-    let linkWords = ["link down", "link is down", "lcp terminated", "padt", "retrain", "showtime", "connection lost", "kernel panic", "oom"]
-    let linkEvents = recent.filter { e in linkWords.contains { e.message.lowercased().contains($0) } }
-    if !linkEvents.isEmpty {
-        r.findings.append(DiagFinding(.warn, "Журнал", "События обрыва связи в журнале за сутки: \(linkEvents.count). Последнее: \(logDayLabel(linkEvents.last!)) \(linkEvents.last!.time) — \(linkEvents.last!.message.prefix(120))"))
+    // Обрывы связи разбираются отдельно (evaluateDrops); здесь остаются только сбои самой системы.
+    let crashes = recent.filter { e in ["kernel panic", "out of memory", "oom-killer"].contains { e.message.lowercased().contains($0) } }
+    if let last = crashes.last {
+        r.findings.append(DiagFinding(.warn, "Журнал", "Сбои системы в журнале за сутки: \(crashes.count). Последний: \(logDayLabel(last)) \(last.time) — \(last.message.prefix(120))"))
     }
     let dhcp6 = errors.filter { $0.process.contains("dhcp6c") }
     if dhcp6.count >= 10 {
@@ -462,6 +463,9 @@ private func evaluateRouter(_ r: inout DiagReport, _ input: RouterDiagInput, pre
         logRows.append(("Журнал охватывает", "с \(logDayLabel(first)) \(first.time) (\(formatDuration(Int(now.timeIntervalSince(d)))))"))
     }
     r.sections.append(("Системный журнал", logRows))
+    let link = LinkStatus(routerUptime: snap.uptime, wanUp: snap.internetUp, wanUptime: snap.internetUp ? snap.internetUptime : 0,
+                          pppoe: snap.encapsulation.hasPrefix("PPP"), line: input.line)
+    evaluateDrops(&r, log: input.systemLog, link: link, now: now)
 
     // --- Родительский контроль
     if let pc = input.parental {
@@ -474,6 +478,61 @@ private func evaluateRouter(_ r: inout DiagReport, _ input: RouterDiagInput, pre
     }
 
     r.metrics = m
+}
+
+/// Обрывы связи: новое чтение журнала сливается с историей, в отчёт идут итог и раздел с таблицей.
+/// Используется и полной диагностикой, и частым режимом `routerdiag --drops-only`.
+public func evaluateDrops(_ r: inout DiagReport, log: [LogEntry], link: LinkStatus?, now: Date, calendar: Calendar = .current) {
+    let t = Int(now.timeIntervalSince1970)
+    let before = r.drops
+    r.drops = before.record(log, link: link, now: t, calendar: calendar)
+    r.newDrops = r.drops.added(since: before)
+    let drops = r.drops.drops
+    let day = drops.filter { $0.at >= t - 86400 }
+    if let last = day.last {
+        let losses = day.reduce(0) { $0 + $1.flaps }
+        r.findings.append(DiagFinding(.warn, "Обрывы связи", "За сутки обрывов связи: \(day.count)\(losses > day.count ? " (потерь связи: \(losses))" : ""). Последний: \(last.whenWithDurationText(calendar: calendar)) — \(last.kindText); причина: \(last.causeLabel)."))
+    } else if let last = drops.last, last.at >= t - 7 * 86400 {
+        r.findings.append(DiagFinding(.info, "Обрывы связи", "За сутки обрывов нет; за 7 дней: \(dropsWithin(drops, now: t, seconds: 7 * 86400)), последний \(last.whenText(calendar: calendar)) — \(last.kind.title)."))
+    }
+    r.dropsMarkdown = renderDrops(r.drops, now: t, calendar: calendar)
+}
+
+/// Раздел отчёта «Обрывы связи»: таблица за 24 часа и сводка за 7 и 30 дней из истории.
+public func renderDrops(_ log: DropLog, now: Int, calendar: Calendar = .current) -> String {
+    func cell(_ s: String) -> String { s.replacingOccurrences(of: "|", with: "\\|") }
+    let drops = log.drops
+    let day = drops.filter { $0.at >= now - 86400 }
+    var out = "## Обрывы связи\n\n"
+    if day.isEmpty { out += "За последние 24 часа обрывов не зафиксировано.\n\n" }
+    else {
+        out += "| Время | Длительность | Что случилось | Причина | Линия после |\n|---|---|---|---|---|\n"
+        for d in day.reversed() {
+            out += "| \(d.whenText(calendar: calendar)) | \(d.durationText) | \(cell(d.kindText)) | \(cell(d.causeLabel)) | \(cell(d.lineText)) |\n"
+        }
+        out += "\n"
+    }
+    out += "| Период | Обрывов | Потерь связи | Без связи всего |\n|---|---|---|---|\n"
+    for (title, seconds) in [("24 часа", 86400), ("7 дней", 7 * 86400), ("30 дней", 30 * 86400)] {
+        let part = drops.filter { $0.at >= now - seconds }
+        // Обрывы без известной длительности (начало ушло из журнала) в сумму не входят — это видно по «+N без длительности».
+        let known = part.compactMap(\.durationSec), unknown = part.count - known.count
+        let total = known.isEmpty && unknown > 0 ? "—" : formatShortDuration(known.reduce(0, +))
+        out += "| \(title) | \(part.count) | \(part.reduce(0) { $0 + $1.flaps }) | \(total)\(unknown > 0 && !known.isEmpty ? " (+\(unknown) без длительности)" : "") |\n"
+    }
+    out += "\n"
+    if let last = drops.last {
+        out += "Последний обрыв: \(last.whenWithDurationText(calendar: calendar)) — \(last.kindText).\n\n"
+        if !last.lines.isEmpty { out += "Строки журнала роутера:\n\n```\n" + last.lines.joined(separator: "\n") + "\n```\n\n" }
+    }
+    if let line = log.lastLine {
+        func n(_ v: Double?) -> String { v.map { fmt($0) } ?? "—" }
+        out += "Линия DSL сейчас: ↓ \(fmt(Double(line.downKbps) / 1000)) / ↑ \(fmt(Double(line.upKbps) / 1000)) Мбит/с, запас по шуму \(n(line.snrDown)) / \(n(line.snrUp)) дБ, затухание \(n(line.attnDown)) / \(n(line.attnUp)) дБ, ошибки CRC \(line.crcDown) / \(line.crcUp)"
+        if let up = line.uptimeSec { out += ", в синхронизации \(formatDuration(up))" }
+        out += ".\n\n"
+    }
+    out += "История хранится \(dropRetentionDays) дней; журнал роутера охватывает лишь несколько часов, поэтому он читается каждые 20 минут (`routerdiag --drops-only`).\n\n"
+    return out
 }
 
 // MARK: - Отчёт
@@ -489,6 +548,7 @@ public func renderMarkdown(_ r: DiagReport) -> String {
         for x in findings { out += "- \(x.level.mark) **\(x.area).** \(x.text)\n" }
         out += "\n"
     }
+    out += r.dropsMarkdown
     for s in r.sections where !s.rows.isEmpty {
         out += "## \(s.title)\n\n| Показатель | Значение |\n|---|---|\n"
         for (k, v) in s.rows { out += "| \(k) | \(v.replacingOccurrences(of: "|", with: "\\|")) |\n" }

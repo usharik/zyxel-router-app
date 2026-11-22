@@ -139,4 +139,35 @@ class LayoutFitTest(private val widthDp: Int, private val fontScale: Float, priv
         val px = with(rule.density) { available.toPx() }
         assertTrue("подпись шире доступного", widthPx("label") <= px + 1)
     }
+
+    private val dropNow = 1_795_000_000L
+
+    /** Подпись внутри строки обрыва (строка — одна кнопка со слитой семантикой, подписи видны в неслитом дереве). */
+    private fun assertFits(text: String) {
+        val parent = rule.onNodeWithTag("parent").getBoundsInRoot()
+        val bounds = rule.onNodeWithText(text, useUnmergedTree = true).getBoundsInRoot()
+        assertTrue("«$text» за правым краем", bounds.right <= parent.right + 1.dp)
+        assertTrue("«$text» без ширины", bounds.right - bounds.left > 0.dp)
+    }
+
+    /** Блок «Обрывы связи»: длинные подписи на всех языках не выталкивают длительность за край. */
+    @Test fun connectionDropsCardFits() {
+        val line = LineStats(dropNow, true, "VDSL2", 184_364, 55_613, 6.3, 7.5, 9.7, 1.9, 12.3, 7.5, 45, 0, 17_390_643, 3449, 1_228_521)
+        val drop = ConnectionDrop(dropNow - 7200, dropNow - 3540, restoredInferred = true, kind = DropKind.DSL_LINE, iface = "VDSL", flaps = 12, cause = DropCause.NO_ECHO, lineHeld = false, line = line)
+        show { DropsSummaryCard(listOf(drop), dropNow, {}) {} }
+        assertFits(res.getString(R.string.drop_approx, res.getString(R.string.duration_hm, 1, 1)))
+        assertFits(res.getString(R.string.drops_title))
+        assertFits(res.getString(R.string.drops_counts, 1, 1, 1))
+        val cause = rule.onNodeWithText(res.getString(R.string.drop_cause_no_echo), useUnmergedTree = true).getBoundsInRoot()
+        assertTrue("причина за правым краем", cause.right <= rule.onNodeWithTag("parent").getBoundsInRoot().right)
+        assertTrue("названию обрыва не осталось ширины", cause.right - cause.left > 40.dp)
+    }
+
+    /** Обрыв без восстановления: состояние вместо длительности помещается и у последнего, и у старого обрыва. */
+    @Test fun unrestoredDropRowFits() {
+        val drop = ConnectionDrop(dropNow - 90_000, null, kind = DropKind.PPP_SESSION, iface = "VDSL", flaps = 3)
+        show { androidx.compose.foundation.layout.Column { DropRow(drop, latest = true) {}; DropRow(drop.copy(lostAt = dropNow - 180_000), latest = false) {} } }
+        assertFits(res.getString(R.string.drop_ongoing))
+        assertFits(res.getString(R.string.drop_not_logged))
+    }
 }

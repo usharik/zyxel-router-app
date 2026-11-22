@@ -33,6 +33,8 @@ interface RouterApi {
     /** Маршруты из [ROUTING_PARTS] разделов; [onProgress] — сколько уже прочитано. */
     fun routing(onProgress: (done: Int) -> Unit = {}): Routing
     fun systemLog(security: Boolean = false): List<LogEntry>
+    /** Состояние линии DSL для учёта обрывов; null, если роутер его не отдаёт (не DSL, другая прошивка). */
+    fun lineStats(): LineStats? = null
     fun reboot()
     /** Закрывает сессию на роутере и самого клиента. */
     fun logout()
@@ -60,7 +62,7 @@ class DemoRouter(private val now: () -> Long = System::currentTimeMillis) : Rout
         val elapsed = (now() - startedAt) / 1000
         val s = JSONObject(status.toString())
         s.getJSONObject("DeviceInfo").put("UpTime", 412_000 + elapsed)
-        s.getJSONArray("WanLanInfo").getJSONObject(1).put("pppoeConnectionUpTime", 86_520 + elapsed)
+        s.getJSONArray("WanLanInfo").getJSONObject(1).put("pppoeConnectionUpTime", DEMO_WAN_UPTIME + elapsed)
         return parseSnapshot(s, hosts).copy(schema = "")
     }
 
@@ -101,18 +103,26 @@ class DemoRouter(private val now: () -> Long = System::currentTimeMillis) : Rout
         return parseRouting(list("static"), list("dns"), list("policy"), list("rip"))
     }
 
-    /** Журнал за последние три недели относительно сегодняшнего дня, чтобы статистика по дням не была пустой. */
+    /**
+     * Журнал за последние три недели относительно сегодняшнего дня, чтобы статистика по дням не была пустой, и два
+     * обрыва связи ([DEMO_DROPS]). Время считается от запуска демо, чтобы обрывы не «переезжали» между чтениями.
+     */
     override fun systemLog(security: Boolean): List<LogEntry> {
-        val calendar = java.util.Calendar.getInstance().apply { timeInMillis = now() }
-        val lines = JSONArray()
-        DEMO_LOG.forEachIndexed { i, (category, severity, message) ->
-            val c = calendar.clone() as java.util.Calendar
-            c.add(java.util.Calendar.HOUR_OF_DAY, -i * 7)
-            val month = java.text.SimpleDateFormat("MMM", java.util.Locale.US).format(c.time)
-            val stamp = String.format(java.util.Locale.ROOT, "%s %2d %02d:%02d:%02d", month, c.get(java.util.Calendar.DAY_OF_MONTH), c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE), 0)
-            lines.put("[$category] $stamp $severity $message")
+        val format = java.text.SimpleDateFormat("MMM d HH:mm:ss", java.util.Locale.US)
+        fun line(secondsAgo: Long, category: String, severity: String, message: String): Pair<Long, String> {
+            val at = startedAt - secondsAgo * 1000
+            return at to "[$category] ${format.format(java.util.Date(at))} $severity $message"
         }
+        val background = DEMO_LOG.mapIndexed { i, (category, severity, message) -> line(i * 7 * 3600L + 1800, category, severity, message) }
+        val drops = DEMO_DROPS.flatMap { (endedAgo, events) -> events.map { (before, category, severity, message) -> line(endedAgo + before, category, severity, message) } }
+        val lines = JSONArray((background + drops).sortedBy { it.first }.map { it.second })
         return parseLog(JSONArray().put(JSONObject().put("result", lines)).toString())
+    }
+
+    /** Линия держит синхронизацию со времени старого обрыва из [DEMO_DROPS]: он показан как обрыв линии, свежий — как обрыв сессии. */
+    override fun lineStats(): LineStats? {
+        val elapsed = (now() - startedAt) / 1000
+        return parseLineStats(DEMO_LINE.replace("@UPTIME@", "${DEMO_LINE_UPTIME + elapsed} secs"), now() / 1000)
     }
 
     override fun reboot() = Unit
@@ -128,6 +138,9 @@ class DemoRouter(private val now: () -> Long = System::currentTimeMillis) : Rout
 }
 
 private const val FIRMWARE_LINE = "V5.50(ABPM.7.3)C0"
+/** Текущая сессия PPP началась, когда закончился свежий обрыв из [DEMO_DROPS]; линия DSL — когда закончился старый. */
+private const val DEMO_WAN_UPTIME = 11_520L
+private const val DEMO_LINE_UPTIME = 2 * 86_400L + 5_400
 
 private val DEMO_STATUS = """
 {
@@ -136,7 +149,7 @@ private val DEMO_STATUS = """
   "WanLanInfo": [
     { "Status": "Up", "LinkType": "None", "X_ZYXEL_SrvName": "Default", "IPv4Address": [{ "IPAddress": "192.168.1.1" }] },
     { "Status": "Up", "LinkType": "PTM", "X_ZYXEL_SrvName": "Internet", "Encapsulation": "PPPoE", "DefaultGateway": true,
-      "pppoeConnectionUpTime": 86520, "IPv4Address": [{ "IPAddress": "203.0.113.7" }], "dnsv4Server": [{ "DNSServer": "1.1.1.1" }] }
+      "pppoeConnectionUpTime": $DEMO_WAN_UPTIME, "IPv4Address": [{ "IPAddress": "203.0.113.7" }], "dnsv4Server": [{ "DNSServer": "1.1.1.1" }] }
   ],
   "WiFiInfo": [
     { "SSID": "Home", "Enable": true, "Channel": 6, "OperatingFrequencyBand": "2.4GHz", "OperatingStandards": "b,g,n", "ModeEnabled": "WPA2-Personal", "X_ZYXEL_MainSSID": true, "wifiPassword": "demo-home-24" },
@@ -193,3 +206,53 @@ private val DEMO_LOG = listOf(
     Triple("kernel", "kern.err", "kernel: DSL line retrained"),
     Triple("ppp", "daemon.info", "pppd: PPP session established"),
 ).let { base -> List(4) { base }.flatten() }
+
+private data class DemoEvent(val secondsBeforeEnd: Long, val category: String, val severity: String, val message: String)
+
+/**
+ * Обрывы связи для демо: сколько секунд назад инцидент закончился и его строки в формулировках настоящего роутера
+ * (VMG8623-T50B). Свежий — оборвалась сессия PPP, связь дважды пропадала; старый — пропала линия DSL.
+ */
+private val DEMO_DROPS = listOf(
+    DEMO_WAN_UPTIME to listOf(
+        DemoEvent(120, "pppoe", "daemon.info", "pppd: Connect time 2790.4 minutes."),
+        DemoEvent(120, "pppoe", "daemon.info", "pppd: Sent 86973506 bytes, received 528438004 bytes."),
+        DemoEvent(120, "pppoe", "daemon.notice", """pppd: Json PPP { "ip": "203.0.113.7", "linkname": "pppd3", "type": "ipv4", "state": "down" }"""),
+        DemoEvent(64, "pppoe", "daemon.info", "pppd: Sent PADT"),
+        DemoEvent(64, "pppoe", "daemon.notice", "pppd: Connect: ppp2 <--> nas8_0"),
+        DemoEvent(61, "pppoe", "daemon.notice", "pppd: PAP authentication succeeded"),
+        DemoEvent(61, "pppoe", "daemon.notice", """pppd: Json PPP { "ip": "203.0.113.7", "remote": "203.0.113.1", "linkname": "pppd3", "type": "ipv4", "state": "up" }"""),
+        DemoEvent(12, "system", "user.notice", "zcmdModuleCfg: System: Wan interface VDSL connection lost"),
+        DemoEvent(0, "system", "user.notice", "zcmdModuleCfg: System: Wan interface VDSL connection ready"),
+    ),
+    DEMO_LINE_UPTIME to listOf(
+        DemoEvent(96, "pppoe", "daemon.info", "pppd: No response to 5 echo-requests"),
+        DemoEvent(96, "pppoe", "daemon.notice", "pppd: Serial link appears to be disconnected."),
+        DemoEvent(95, "pppoe", "daemon.notice", """pppd: Json PPP { "ip": "203.0.113.7", "linkname": "pppd3", "type": "ipv4", "state": "down" }"""),
+        DemoEvent(94, "system", "user.notice", "zcmdModuleCfg: System: Wan interface VDSL connection lost"),
+        DemoEvent(-28, "pppoe", "daemon.notice", "pppd: PAP authentication succeeded"),
+        DemoEvent(-30, "pppoe", "daemon.notice", """pppd: Json PPP { "ip": "203.0.113.7", "remote": "203.0.113.1", "linkname": "pppd3", "type": "ipv4", "state": "up" }"""),
+        DemoEvent(-32, "system", "user.notice", "zcmdModuleCfg: System: Wan interface VDSL connection ready"),
+    ),
+)
+
+/** Статистика линии в формате страницы «xDSL Statistics» настоящего роутера. */
+private val DEMO_LINE = """
+       Line State:      Up
+       Modulation:      ITU G.993.5(G.Vectoring),G.998.4(G.INP)
+near-end interleaved channel bit rate: 98304 kbps
+near-end fast channel bit rate: 0 kbps
+far-end interleaved channel bit rate: 0 kbps
+far-end fast channel bit rate: 20480 kbps
+near-end FEC error interleaved: 173906
+near-end CRC error interleaved: 45
+far-end FEC error fast: 3449
+far-end CRC error fast: 2
+DSL uptime :@UPTIME@
+noise margin downstream: 6.3 dB
+output power upstream: 7.5 dbm
+attenuation downstream: 9.7 dB
+noise margin upstream: 7.5 dB
+output power downstream: 12.3 dbm
+attenuation upstream: 1.9 dB
+"""

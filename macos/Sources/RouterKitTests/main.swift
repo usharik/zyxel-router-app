@@ -344,5 +344,155 @@ let entry = parseLog(["[attack] Dec 31 23:00:00 kern.alert kernel: UDP PORT SCAN
 let jan = DateComponents(calendar: Calendar.current, year: 2027, month: 1, day: 1, hour: 1).date!
 eq(logDate(entry, now: jan).map { Calendar.current.component(.year, from: $0) }, 2026, "журнал: запись 31 дек в январе относится к прошлому году")
 
+
+// MARK: обрывы связи (те же случаи, что в android/.../ConnectionDropsTest.kt)
+func loadFixtureAny(_ name: String) -> Any? {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    guard let data = try? Data(contentsOf: root.appendingPathComponent("fixtures/real/\(name).json")) else { return nil }
+    return try? JSONSerialization.jsonObject(with: data)
+}
+var prague = Calendar(identifier: .gregorian)
+prague.timeZone = TimeZone(identifier: "Europe/Prague")!
+func at(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> Int {
+    Int(prague.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi, second: s))!.timeIntervalSince1970)
+}
+func lost(_ time: String, _ iface: String = "VDSL") -> String { "[system] \(time) user.notice zcmdModuleCfg: System: Wan interface \(iface) connection lost" }
+func ready(_ time: String, _ iface: String = "VDSL") -> String { "[system] \(time) user.notice zcmdModuleCfg: System: Wan interface \(iface) connection ready" }
+func drops(_ lines: [String], _ now: Int) -> [ConnectionDrop] { dropsFromLog(parseLog(lines), now: now, calendar: prague) }
+
+// Настоящий журнал и статистика линии: сняты 22.11.2026 в 19:15, роутер работает 14 суток, сессия PPP — 7104 с.
+let captured = at(2026, 11, 22, 19, 15, 20)
+if let rawLog = loadFixtureAny("syslog_drops"), let realLine = parseLineStats(lineStatsText(loadFixtureAny("xdsl_statistics")), now: captured) {
+    let realLog = parseLog(rawLog)
+    check(realLog.count > 500, "обрывы: настоящий журнал разобран (\(realLog.count))")
+    let found = dropsFromLog(realLog, now: captured, calendar: prague)
+    eq(found.count, 1, "обрывы: в настоящем журнале один инцидент")
+    if let d = found.first {
+        eq(d.lostAt, at(2026, 11, 22, 17, 14, 58), "обрывы: начало — конец сессии pppd")
+        eq(d.restoredAt, at(2026, 11, 22, 17, 16, 58), "обрывы: конец — последнее «connection ready»")
+        eq(d.durationSec, 120, "обрывы: длительность 2 минуты")
+        eq(d.flaps, 3, "обрывы: три потери связи подряд")
+        eq(d.kind, .pppSession, "обрывы: оборвалась сессия PPP")
+        eq(d.iface, "VDSL", "обрывы: интерфейс из журнала")
+        eq(d.sessionMinutes, 20355, "обрывы: длина оборвавшейся сессии")
+        check(d.cause == nil, "обрывы: причину роутер не записал")
+        check(d.lines.first?.contains("Connect time 20355.0 minutes") == true, "обрывы: итог сессии pppd стоит первым")
+        eq(d.lines.filter { $0.contains("connection lost") }.count, 2, "обрывы: обе строки «connection lost» в контексте")
+        check(!d.lines.contains { $0.contains("ZTR69") || $0.contains("dnsmasq") }, "обрывы: посторонних строк в контексте нет")
+    }
+    eq(realLine.downKbps, 184_364, "линия: скорость приёма"); eq(realLine.upKbps, 55_613, "линия: скорость отдачи")
+    eq(realLine.snrDown, 6.3, "линия: запас по шуму ↓"); eq(realLine.snrUp, 7.5, "линия: запас по шуму ↑")
+    eq(realLine.attnDown, 9.7, "линия: затухание ↓"); eq(realLine.powerDown, 12.3, "линия: мощность ↓")
+    eq(realLine.crcDown, 45, "линия: ошибки CRC"); eq(realLine.fecDown, 17_390_643, "линия: FEC ↓"); eq(realLine.fecUp, 3449, "линия: FEC ↑")
+    eq(realLine.uptimeSec, 14 * 86400 + 5 * 3600 + 15 * 60 + 21, "линия: «14 days,  5:15, 21 secs»")
+    check(realLine.up && realLine.modulation.contains("G.993.5"), "линия: состояние и модуляция")
+    eq(parseLineUptime("1 min, 10 secs"), 70, "линия: «1 min, 10 secs»")
+    check(parseLineStats("ZCFG_NO_SUCH_OBJECT", now: captured) == nil, "линия: не статистика DSL — nil")
+
+    func realLink(_ later: Int = 0) -> LinkStatus {
+        var line = realLine; line.capturedAt = captured + later; line.uptimeSec = realLine.uptimeSec! + later
+        return LinkStatus(routerUptime: 1_228_689 + later, wanUp: true, wanUptime: 7104 + later, pppoe: true, line: line)
+    }
+    let first = DropLog().record(realLog, link: realLink(), now: captured, calendar: prague)
+    eq(first.drops.count, 1, "обрывы: время работы PPP совпало с концом инцидента — лишнего нет")
+    eq(first.drops.first?.lineHeld, true, "обрывы: линия DSL держала синхронизацию")
+    eq(first.drops.first?.kind, .pppSession, "обрывы: вид не меняется на обрыв линии")
+    eq(first.drops.first?.line?.downKbps, 184_364, "обрывы: замер линии приложен")
+    let again = first.record(realLog, link: realLink(300), now: captured + 300, calendar: prague)
+    check(again.drops == first.drops, "обрывы: повторное чтение не меняет историю")
+    let tail = realLog.filter { (logEpoch($0, now: captured, calendar: prague) ?? 0) >= at(2026, 11, 22, 17, 16, 40) }
+    eq(dropsFromLog(tail, now: captured, calendar: prague).first?.lostAt, at(2026, 11, 22, 17, 16, 46), "обрывы: в хвосте журнала свой короткий инцидент")
+    let later = again.record(tail, link: realLink(3600), now: captured + 3600, calendar: prague)
+    check(later.drops == first.drops, "обрывы: хвост журнала сливается с сохранённым инцидентом")
+    check(later.added(since: first).isEmpty && first.added(since: DropLog()).count == 1, "обрывы: новым считается только впервые найденный")
+    let coded = try! JSONDecoder().decode(DropLog.self, from: JSONEncoder().encode(first))
+    check(coded == first, "обрывы: история переживает запись в JSON")
+    // Формат JSON общий с Android: имена полей и коды перечислений.
+    let json = String(data: try! JSONEncoder().encode(first), encoding: .utf8)!
+    check(json.contains("\"kind\":\"PPP_SESSION\"") && json.contains("\"lostAt\":\(at(2026, 11, 22, 17, 14, 58))") && json.contains("\"lastLine\""), "обрывы: формат JSON как в Android")
+
+    // Отчёт диагностики: итог и раздел с таблицей.
+    var report = DiagReport(date: Date(timeIntervalSince1970: TimeInterval(captured)))
+    evaluateDrops(&report, log: realLog, link: realLink(), now: report.date, calendar: prague)
+    eq(report.newDrops.count, 1, "отчёт: новый обрыв найден")
+    check(report.findings.contains { $0.area == "Обрывы связи" && $0.level == .warn && $0.text.contains("обрывов связи: 1") && $0.text.contains("17:14:58") && $0.text.contains("2 мин 0 с") }, "отчёт: итог называет число и время обрыва")
+    let md = renderMarkdown(report)
+    check(md.contains("## Обрывы связи") && md.contains("| Время | Длительность |") && md.contains("оборвалась сессия PPP") && md.contains("| 7 дней | 1 | 3 | 2 мин 0 с |"), "отчёт: раздел «Обрывы связи» с таблицей и сводкой")
+    check(md.contains("Wan interface VDSL connection lost"), "отчёт: строки журнала последнего обрыва")
+    eq(report.findings.filter { $0.text.contains("бры") }.count, 1, "отчёт: обрыв не дублируется другими замечаниями")
+} else {
+    check(false, "обрывы: фикстуры syslog_drops и xdsl_statistics не найдены")
+}
+
+do {
+    let now = at(2026, 11, 22, 20, 0)
+    let two = drops([lost("Nov 22 17:16:08"), ready("Nov 22 17:16:36"), lost("Nov 22 17:16:46"), ready("Nov 22 17:16:58"), lost("Nov 22 17:30:00"), ready("Nov 22 17:30:38")], now)
+    eq(two.map(\.flaps), [2, 1], "обрывы: потери в пределах 5 минут — один инцидент")
+    eq(two.map(\.durationSec), [50, 38], "обрывы: длительности инцидентов")
+    eq(drops([lost("Nov 22 17:16:08"), lost("Nov 22 17:16:20", "WWAN"), ready("Nov 22 17:16:40", "WWAN")], now).count, 2, "обрывы: другой интерфейс — другой инцидент")
+    eq(drops([lost("Nov 22 10:00:00"), ready("Nov 22 12:30:00")], now).first?.durationSec, 9000, "обрывы: долгий обрыв заканчивается своим восстановлением")
+    let lostTwice = drops([lost("Nov 22 10:00:00"), lost("Nov 22 18:00:00"), ready("Nov 22 18:00:30")], now)
+    check(lostTwice.count == 2 && lostTwice[0].restoredAt == nil && lostTwice[1].durationSec == 30, "обрывы: новая потеря после долгой тишины — новый инцидент")
+
+    let newYear = drops([lost("Dec 31 23:59:50"), ready("Jan  1 00:00:20")], at(2027, 1, 2, 9, 0)).first
+    eq(newYear?.lostAt, at(2026, 12, 31, 23, 59, 50), "обрывы: 31 декабря в январе — прошлый год")
+    eq(newYear?.durationSec, 30, "обрывы: инцидент через Новый год")
+
+    let onlyLost = parseLog([lost("Nov 22 19:00:00")])
+    check(DropLog().record(onlyLost, link: LinkStatus(routerUptime: 500_000, wanUp: false, wanUptime: 0, pppoe: true, line: nil), now: now, calendar: prague).drops.first?.restoredAt == nil, "обрывы: связи нет — восстановления нет")
+    let up = DropLog().record(onlyLost, link: LinkStatus(routerUptime: 500_000, wanUp: true, wanUptime: 3540, pppoe: true, line: nil), now: now, calendar: prague)
+    check(up.drops.first?.restoredAt == at(2026, 11, 22, 19, 1) && up.drops.first?.restoredInferred == true, "обрывы: восстановление выведено из времени работы WAN")
+    let exact = up.record(parseLog([lost("Nov 22 19:00:00"), ready("Nov 22 19:00:48")]), link: nil, now: now, calendar: prague).drops.first
+    check(exact?.durationSec == 48 && exact?.restoredInferred == false, "обрывы: восстановление из журнала важнее вычисленного")
+
+    let link = LinkStatus(routerUptime: 500_000, wanUp: true, wanUptime: 3600, pppoe: true, line: nil)
+    let inferred = DropLog().record([], link: link, now: now, calendar: prague)
+    check(inferred.drops.count == 1 && inferred.drops[0].lostAt == nil && inferred.drops[0].restoredAt == now - 3600 && inferred.drops[0].kind == .pppSession, "обрывы: переподключение, которого нет в журнале")
+    check(inferred.record([], link: LinkStatus(routerUptime: 500_300, wanUp: true, wanUptime: 3897, pppoe: true, line: nil), now: now + 300, calendar: prague).drops == inferred.drops, "обрывы: выведенный инцидент не дублируется")
+    check(DropLog().record([], link: LinkStatus(routerUptime: 4000, wanUp: true, wanUptime: 3800, pppoe: true, line: nil), now: now, calendar: prague).drops.isEmpty, "обрывы: подключение после загрузки роутера — не обрыв")
+
+    var line = LineStats(capturedAt: now, up: true, modulation: "", downKbps: 100_000, upKbps: 20_000, crcDown: 45, crcUp: 0, fecDown: 0, fecUp: 0, uptimeSec: 3600)
+    let resync = DropLog().record(parseLog([lost("Nov 22 18:58:20"), ready("Nov 22 19:00:40"), lost("Nov 22 19:40:00"), ready("Nov 22 19:40:20")]),
+                                  link: LinkStatus(routerUptime: 500_000, wanUp: true, wanUptime: 1180, pppoe: true, line: line), now: now, calendar: prague).drops
+    check(resync.count == 2 && resync[0].kind == .dslLine && resync[0].lineHeld == false && resync[1].kind == .wan && resync[1].lineHeld == true, "обрывы: пересинхронизация линии делает обрыв обрывом DSL")
+    let lineOnly = DropLog().record([], link: LinkStatus(routerUptime: 500_000, wanUp: true, wanUptime: 3570, pppoe: true, line: line), now: now, calendar: prague).drops
+    check(lineOnly.count == 1 && lineOnly[0].kind == .dslLine && lineOnly[0].restoredAt == now - 3600, "обрывы: обрыв линии выведен из времени её работы")
+
+    line.uptimeSec = 1_228_521
+    var before = line; before.capturedAt = now - 1800; before.crcDown = 40
+    let crc = DropLog(lastLine: before).record(parseLog([lost("Nov 22 19:50:00"), ready("Nov 22 19:50:30")]),
+                                               link: LinkStatus(routerUptime: 1_228_689, wanUp: true, wanUptime: 570, pppoe: true, line: line), now: now, calendar: prague).drops.first
+    check(crc?.crcDelta == 5 && crc?.crcSince == now - 1800, "обрывы: прирост ошибок CRC с прошлого замера")
+
+    let ppp = drops([
+        "[pppoe] Nov 22 19:00:00 daemon.info pppd: No response to 5 echo-requests",
+        "[pppoe] Nov 22 19:00:00 daemon.notice pppd: Serial link appears to be disconnected.",
+        "[pppoe] Nov 22 19:00:01 daemon.notice pppd: Json PPP { \"linkname\": \"pppd3\", \"type\": \"ipv4\", \"state\": \"down\" }",
+        "[pppoe] Nov 22 19:01:05 daemon.warning pppd: Timeout waiting for PADO packets",
+        "[pppoe] Nov 22 19:02:10 daemon.notice pppd: Json PPP { \"type\": \"ipv4\", \"state\": \"up\" }",
+    ], now).first
+    check(ppp?.cause == .noEcho && ppp?.causeText == "No response to 5 echo-requests" && ppp?.flaps == 1 && ppp?.durationSec == 130 && ppp?.kind == .pppSession, "обрывы: причина из сообщений pppd")
+    let other = parseLog([
+        "[kernel] Nov 22 19:00:00 kern.err kernel: DSL line retrained",
+        "[ppp] Nov 22 19:00:00 daemon.info pppd: PPP session established",
+        "[tr69] Nov 22 19:00:00 daemon.info ZTR69: [ERROR ] cwmp_monitor_cwmp(): wan not ready",
+        "[dhcpc] Nov 22 19:00:00 user.err dhcp6c: client6_send: transmit failed: Network is unreachable",
+        "[system] Nov 22 19:00:00 user.notice zcmdModuleCfg: System: configuration saved",
+        ready("Nov 22 19:05:00"),
+    ])
+    check(dropsFromLog(other, now: now, calendar: prague).isEmpty, "обрывы: незнакомые формулировки не считаются обрывом")
+    check(other.map(dropLineIsLoss) == [nil, nil, nil, nil, nil, false], "обрывы: подсветка только строк о связи")
+    eq(drops(["[xdsl] Nov 22 19:00:00 daemon.notice xdsl: DSL link down", "[xdsl] Nov 22 19:01:00 daemon.notice xdsl: DSL link up"], now).first?.kind, .dslLine, "обрывы: категория xdsl — обрыв линии")
+
+    let old = ConnectionDrop(lostAt: now - 100 * 86400, restoredAt: now - 100 * 86400 + 30)
+    let recent = ConnectionDrop(lostAt: now - 89 * 86400, restoredAt: now - 89 * 86400 + 30)
+    check(DropLog(drops: [old, recent]).record([], link: nil, now: now, calendar: prague).drops == [recent], "обрывы: история хранится 90 дней")
+    let many = (1...(dropMaxStored + 20)).map { ConnectionDrop(lostAt: now - $0 * 3600, restoredAt: now - $0 * 3600 + 10) }
+    let kept = DropLog(drops: many).record([], link: nil, now: now, calendar: prague).drops
+    check(kept.count == dropMaxStored && kept.last?.lostAt == now - 3600, "обрывы: предел числа записей, остаются новые")
+    eq(dropsWithin(kept, now: now, seconds: 86400), 24, "обрывы: счёт за сутки")
+    eq(formatShortDuration(38), "38 с", "обрывы: короткая длительность"); eq(formatShortDuration(120), "2 мин 0 с", "обрывы: длительность в минутах")
+}
+
 print("\n==== \(failures == 0 ? "ВСЕ ТЕСТЫ ПРОЙДЕНЫ" : "ПРОВАЛЕНО: \(failures)") ====")
 exit(failures == 0 ? 0 : 1)

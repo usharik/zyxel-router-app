@@ -63,6 +63,8 @@ final class AppModel: ObservableObject {
     @Published var parental: ParentalControl?
     @Published var routing: Routing?
     @Published var log: [LogEntry]?
+    /// Обрывы связи, от новых к старым: из прочитанного журнала плюс история, которую ведёт routerdiag (drops.json).
+    @Published var drops: [ConnectionDrop] = []
     @Published var selectedTab = 0   // явный выбор вкладки, иначе TabView сбрасывается при смене баннера
     @Published var sectionBusy = false
     // Состояние редактора профиля родительского контроля.
@@ -179,6 +181,7 @@ final class AppModel: ObservableObject {
         parental = nil
         routing = nil
         log = nil
+        drops = []
         editorOpen = false
         error = failure.localizedDescription
         phase = .login
@@ -249,8 +252,22 @@ final class AppModel: ObservableObject {
         guard let client else { return }
         sectionBusy = true
         defer { sectionBusy = false }
-        do { log = try await client.systemLog(security: security); setBanner(nil) }
-        catch { setBanner(error.localizedDescription) }
+        do {
+            let entries = try await client.systemLog(security: security)
+            log = entries
+            if !security { drops = connectionDrops(entries, line: (try? await client.lineStats()) ?? nil) }
+            setBanner(nil)
+        } catch { setBanner(error.localizedDescription) }
+    }
+
+    /// Историю обрывов пишет только routerdiag (каждые 20 минут); приложение её читает и дополняет свежим журналом.
+    private func connectionDrops(_ entries: [LogEntry], line: LineStats?) -> [ConnectionDrop] {
+        let url = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/ZyxelRouter/diagnostics/drops.json")
+        let stored = (try? JSONDecoder().decode(DropLog.self, from: Data(contentsOf: url))) ?? DropLog()
+        let link = snapshot.map {
+            LinkStatus(routerUptime: $0.uptime, wanUp: $0.internetUp, wanUptime: $0.internetUp ? $0.internetUptime : 0, pppoe: $0.encapsulation.hasPrefix("PPP"), line: line)
+        }
+        return stored.record(entries, link: link, now: Int(Date().timeIntervalSince1970)).drops.reversed()
     }
 
     /// Запись с восстановлением сессии: опрос (только чтение) об устаревшем CSRF-токене не узнает.
@@ -415,6 +432,7 @@ final class AppModel: ObservableObject {
         parental = nil
         routing = nil
         log = nil
+        drops = []
         editorOpen = false
         phase = .login
     }

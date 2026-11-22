@@ -171,8 +171,27 @@ class RouterClientProtocolTest {
 
     @Test fun encryptedLogIsDecrypted() {
         val log = signedIn().systemLog()
-        assertEquals(5, log.size)
+        assertEquals(9, log.size)
         assertTrue(log.any { it.severity == "err" })
+    }
+
+    /** Весь путь обрыва связи через настоящего клиента: журнал и статистика линии расшифрованы и разобраны. */
+    @Test fun connectionDropAndLineStatsComeThroughTheClient() {
+        val c = signedIn()
+        val now = System.currentTimeMillis() / 1000
+        val drop = dropsFromLog(c.systemLog(), now).single()
+        assertEquals(40L, drop.durationSec)
+        assertEquals(DropKind.PPP_SESSION, drop.kind)
+        assertEquals("VDSL", drop.iface)
+        assertEquals(1440L, drop.sessionMinutes)
+        val line = c.lineStats()!!
+        assertEquals(98_304L, line.downKbps)
+        assertEquals(6.3, line.snrDown!!, 0.001)
+        assertEquals(14 * 86400L + 5 * 3600 + 15 * 60 + 21, line.uptimeSec)
+        control("/__test/config", """{"status":{"xdsl":404}}""")
+        assertEquals("роутер без статистики DSL — не ошибка", null, c.lineStats())
+        control("/__test/config", """{"status":{"xdsl":401}}""")
+        assertThrows(RouterException.SessionExpired::class.java) { c.lineStats() }
     }
 
     @Test fun changedCertificateIsRefusedBeforePassword() {

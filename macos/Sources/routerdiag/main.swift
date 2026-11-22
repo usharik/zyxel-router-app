@@ -3,6 +3,10 @@ import RouterKit
 
 // Ежедневная глубокая диагностика роутера и связи. Только чтение: ничего на роутере не меняет.
 // Запуск: ROUTER_PASSWORD=... routerdiag [ip] [--no-speedtest] [--no-notify] [--open]
+//         ROUTER_PASSWORD=... routerdiag [ip] --drops-only [--no-notify]
+// --drops-only — частый лёгкий режим (каждые 20 минут из launchd): только журнал и состояние линии, чтобы обрывы
+// связи попали в историю раньше, чем уйдут из короткого журнала роутера. Отчёт не пишется, уведомление — только
+// о новых обрывах.
 // Обычно запускается из launchd через routerdiag.sh (пароль берётся из Связки ключей приложения).
 // Отчёты: ~/Library/Application Support/ZyxelRouter/diagnostics/ (DIAG_DIR переопределяет).
 
@@ -17,6 +21,7 @@ let user = env["ROUTER_USER"] ?? appSetting("username") ?? "admin"
 let password = env["ROUTER_PASSWORD"] ?? ""
 let speedtest = !args.contains("--no-speedtest") && env["DIAG_SPEEDTEST"] != "0"
 let notify = !args.contains("--no-notify")
+let dropsOnly = args.contains("--drops-only")
 let routerHost = String(address.split(separator: ":").first ?? "")
 
 let baseDir = URL(fileURLWithPath: env["DIAG_DIR"] ?? (NSHomeDirectory() + "/Library/Application Support/ZyxelRouter/diagnostics"))
@@ -136,10 +141,11 @@ func fetchRouter() async -> (RouterDiagInput?, String?) {
     let parental = try? await client.parentalControl()
     let syslog = (try? await client.systemLog()) ?? []
     let seclog = (try? await client.systemLog(security: true)) ?? []
+    let line = (try? await client.lineStats()) ?? nil
     await client.logout()
     if status.isEmpty { return (nil, "роутер не вернул cardpage_status") }
     return (RouterDiagInput(status: status, hosts: hosts, traffic: traffic, mgmt: mgmt, firewall: firewall, time: time,
-                            parental: parental, systemLog: syslog, securityLog: seclog), nil)
+                            parental: parental, systemLog: syslog, securityLog: seclog, line: line), nil)
 }
 
 // MARK: - История
@@ -162,6 +168,79 @@ func prune(_ dir: URL, keep: Int) {
     for f in files.dropLast(keep) { try? FileManager.default.removeItem(at: f) }
 }
 
+// MARK: - Обрывы связи
+
+// История обрывов (общая для полного и частого режима) и журнал обрывов для чтения человеком.
+let dropsURL = baseDir.appendingPathComponent("drops.json")
+let dropsLogURL = baseDir.appendingPathComponent("drops.log")
+// После отказа «неверный пароль» частый режим сутки не входит: 72 неудачных входа в день заблокировали бы учётную запись.
+let authFailedURL = baseDir.appendingPathComponent("drops.auth_failed")
+
+func loadDrops() -> DropLog { (try? decoder.decode(DropLog.self, from: Data(contentsOf: dropsURL))) ?? DropLog() }
+
+/// Сохраняет историю; каждый новый обрыв дописывается в drops.log отдельным блоком со всем, что о нём известно.
+func saveDrops(_ report: DiagReport) {
+    do { try encoder.encode(report.drops).write(to: dropsURL, options: .atomic) } catch { log("drops.json: \(error.localizedDescription)") }
+    guard !report.newDrops.isEmpty else { return }
+    var text = ""
+    for d in report.newDrops {
+        text += "=== ОБРЫВ СВЯЗИ \(d.whenText()) ===\n"
+        for (k, v) in d.details() { text += "\(k): \(v)\n" }
+        if !d.lines.isEmpty { text += "Журнал роутера:\n" + d.lines.map { "  " + $0 }.joined(separator: "\n") + "\n" }
+        text += "\n"
+    }
+    if let handle = try? FileHandle(forWritingTo: dropsLogURL) {
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(text.utf8))
+    } else {
+        try? Data(text.utf8).write(to: dropsLogURL)
+    }
+}
+
+func esc(_ s: String) -> String { s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
+func showNotification(title: String, text: String, subtitle: String) {
+    _ = run("/usr/bin/osascript", ["-e", "display notification \"\(esc(text))\" with title \"\(esc(title))\" subtitle \"\(esc(subtitle))\""], timeout: 10)
+}
+
+if dropsOnly {
+    // Роутер допускает одну сессию. Если она занята (открыто приложение или веб-интерфейс) или роутер недоступен,
+    // запуск молча пропускается: следующий — через 20 минут, а журнал роутера хранит несколько часов.
+    guard !password.isEmpty else { log("обрывы: пароль не найден — пропуск"); exit(0) }
+    if let stamp = (try? FileManager.default.attributesOfItem(atPath: authFailedURL.path))?[.modificationDate] as? Date, Date().timeIntervalSince(stamp) < 86400 {
+        log("обрывы: роутер недавно отверг пароль — пропуск до полной диагностики"); exit(0)
+    }
+    guard (parsePing(run("/sbin/ping", ["-q", "-c", "2", "-t", "3", routerHost], timeout: 6))?.received ?? 0) > 0 else {
+        log("обрывы: роутер \(routerHost) недоступен — пропуск"); exit(0)
+    }
+    let client = try RouterClient(address: address)
+    do { try await client.login(username: user, password: password) }
+    catch {
+        if case RouterError.invalidCredentials = error { FileManager.default.createFile(atPath: authFailedURL.path, contents: nil) }
+        log("обрывы: вход не удался (\(error.localizedDescription)) — пропуск"); exit(0)
+    }
+    try? FileManager.default.removeItem(at: authFailedURL)
+    let status = await objects(client, "cardpage_status").first ?? [:]
+    let syslog = try? await client.systemLog()
+    let line = (try? await client.lineStats()) ?? nil
+    await client.logout()
+    guard let syslog, !status.isEmpty else { log("обрывы: роутер не отдал журнал или состояние — пропуск"); exit(0) }
+    let snap = parseSnapshot(status: status, hosts: [:])
+    var report = DiagReport(date: Date())
+    report.drops = loadDrops()
+    evaluateDrops(&report, log: syslog,
+                  link: LinkStatus(routerUptime: snap.uptime, wanUp: snap.internetUp, wanUptime: snap.internetUp ? snap.internetUptime : 0,
+                                   pppoe: snap.encapsulation.hasPrefix("PPP"), line: line), now: report.date)
+    saveDrops(report)
+    log("обрывы: записей журнала \(syslog.count), новых обрывов \(report.newDrops.count), в истории \(report.drops.drops.count)")
+    for d in report.newDrops { print("\(d.whenText()) | \(d.durationText) | \(d.kindText) | причина: \(d.causeLabel) | линия: \(d.lineText)") }
+    if notify, let last = report.newDrops.last {
+        showNotification(title: "🟡 Роутер: обрыв связи", text: "\(last.whenWithDurationText()) — \(last.kindText)" + (report.newDrops.count > 1 ? " (+ещё \(report.newDrops.count - 1))" : ""),
+                         subtitle: "Подробности: drops.log")
+    }
+    exit(0)
+}
+
 // MARK: - Запуск
 
 log("диагностика \(address) начата")
@@ -177,7 +256,7 @@ if !probe.gateway.isEmpty, probe.gateway != routerHost, (probe.pingRouter?.recei
 
 let now = Date()
 let report = diagnose(router: input, routerError: routerError, local: probe, history: loadHistory(), knownDevices: known,
-                      routerAddress: routerHost, now: now)
+                      routerAddress: routerHost, now: now, drops: loadDrops())
 let stamp: String = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd_HHmm"; return f.string(from: now) }()
 let markdown = renderMarkdown(report)
 let reportURL = reportsDir.appendingPathComponent("\(stamp).md")
@@ -186,16 +265,18 @@ try markdown.write(to: baseDir.appendingPathComponent("latest.md"), atomically: 
 if report.metrics.routerReachable || probe.gateway == routerHost {
     try encoder.encode(report.metrics).write(to: historyDir.appendingPathComponent("\(stamp).json"))
 }
-if report.metrics.routerReachable { try encoder.encode(report.knownDevices).write(to: knownURL) }
+if report.metrics.routerReachable {
+    try encoder.encode(report.knownDevices).write(to: knownURL)
+    saveDrops(report)
+    try? FileManager.default.removeItem(at: authFailedURL)
+}
 prune(reportsDir, keep: 120)
 prune(historyDir, keep: 120)
 print(markdown)
 log("готово: \(reportURL.path)")
 
 if notify {
-    func esc(_ s: String) -> String { s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
-    let title = "\(report.level.mark) Роутер: утренняя диагностика"
-    _ = run("/usr/bin/osascript", ["-e", "display notification \"\(esc(notificationSummary(report)))\" with title \"\(esc(title))\" subtitle \"Отчёт: latest.md\""], timeout: 10)
+    showNotification(title: "\(report.level.mark) Роутер: утренняя диагностика", text: notificationSummary(report), subtitle: "Отчёт: latest.md")
 }
 if args.contains("--open") || (env["DIAG_OPEN_ON_PROBLEM"] == "1" && report.level >= .warn) {
     _ = run("/usr/bin/open", [reportURL.path], timeout: 10)

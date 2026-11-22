@@ -327,6 +327,35 @@ struct LogsView: View {
 
     @ViewBuilder private func statsView(_ all: [LogEntry]) -> some View {
         List {
+            Section("Обрывы связи") {
+                if model.drops.isEmpty {
+                    Text("Обрывов не зафиксировано").foregroundStyle(.secondary)
+                } else {
+                    let now = Int(Date().timeIntervalSince1970)
+                    Text("За 24 часа: \(dropsWithin(model.drops, now: now, seconds: 86400)) · за 7 дней: \(dropsWithin(model.drops, now: now, seconds: 7 * 86400)) · в истории: \(model.drops.count)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(model.drops.prefix(20)) { d in
+                        DisclosureGroup {
+                            ForEach(Array(d.details().enumerated()), id: \.offset) { row in
+                                LabeledContent(row.element.0) { Text(row.element.1).textSelection(.enabled) }.font(.callout)
+                            }
+                            ForEach(Array(d.lines.enumerated()), id: \.offset) { line in
+                                Text(line.element).font(.caption.monospaced()).textSelection(.enabled)
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: "bolt.horizontal.circle.fill").foregroundStyle(.red)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(d.whenText()).font(.headline)
+                                    Text(d.kindText).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(d.durationText).font(.callout)
+                            }
+                        }
+                    }
+                }
+            }
             Section("Всего записей: \(all.count)") {
                 Picker("Период", selection: $filter.period) {
                     ForEach(LogPeriod.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -359,14 +388,20 @@ struct LogsView: View {
             }
             .padding(.horizontal)
             List(entries) { e in
+                // Строки о потере и возврате связи выделены фоном и подписью.
+                let loss = dropLineIsLoss(e)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
+                        if let loss {
+                            Text(loss ? "связь пропала" : "связь вернулась").font(.caption.bold()).foregroundStyle(loss ? .red : .green)
+                        }
                         Text(e.category).font(.caption).foregroundStyle(.tint)
                         Text(e.severity).font(.caption).foregroundStyle(severityColor(e.severity))
                         Text("\(logDayLabel(e)) \(e.time)").font(.caption).foregroundStyle(.secondary)
                     }
                     Text(e.message.isEmpty ? e.raw : e.message).font(.callout).textSelection(.enabled)
                 }
+                .listRowBackground(loss.map { ($0 ? Color.red : Color.green).opacity(0.12) })
             }
             .overlay { if entries.isEmpty { Text("Записей нет").foregroundStyle(.secondary) } }
         }

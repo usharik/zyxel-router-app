@@ -782,6 +782,14 @@ class RouterClient(address: String, storedPins: CertificatePins = MemoryCertific
         return parseLog(reply.text)
     }
 
+    /** Статистика линии со страницы «xDSL Statistics» (только чтение). Не DSL или другая прошивка — null, это не ошибка. */
+    override fun lineStats(): LineStats? {
+        val reply = send("GET", "/cgi-bin/xDSLStatistics_handle?line=0")
+        if (reply.status in setOf(401, 403, 504)) throw RouterException.SessionExpired
+        if (reply.status !in 200..299) return null
+        return parseLineStats(lineStatsText(reply.text), System.currentTimeMillis() / 1000)
+    }
+
     override fun reboot() {
         val status = send("POST", "/cgi-bin/Reboot").status
         if (status in setOf(401, 403, 504)) throw RouterException.SessionExpired

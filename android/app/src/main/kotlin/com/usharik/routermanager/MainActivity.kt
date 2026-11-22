@@ -491,7 +491,7 @@ private fun MainScreen(s: UiState, vm: RouterViewModel, ads: AdsController) {
                 when (tab) {
                     0 -> s.snapshot?.let {
                         val showOffer = adsActive && canOffer && offer.formattedPrice != null && AdPacing.offerDue(pacing, AdPacingStore.now())
-                        Overview(it, s.updatedAt, if (showOffer) ({ RemoveAdsCard(offer.formattedPrice, { buyRemoveAds("card") }, ads::dismissOffer) }) else null)
+                        Overview(it, s.updatedAt, s.drops, if (showOffer) ({ RemoveAdsCard(offer.formattedPrice, { buyRemoveAds("card") }, ads::dismissOffer) }) else null)
                     }
                     1 -> s.snapshot?.let { Devices(s, vm) }
                     2 -> s.snapshot?.let { Wifi(it, vm) }
@@ -553,7 +553,7 @@ private fun InfoRow(label: String, value: String, valueColor: Color = Color.Unsp
 }
 
 @Composable
-private fun Overview(s: RouterSnapshot, updatedAt: Long, offerCard: (@Composable () -> Unit)?) {
+private fun Overview(s: RouterSnapshot, updatedAt: Long, drops: List<ConnectionDrop>, offerCard: (@Composable () -> Unit)?) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         SectionCard(stringResource(R.string.section_internet)) {
             InfoRow(stringResource(R.string.status), if (s.internetUp) stringResource(R.string.connected) else stringResource(R.string.not_connected), if (s.internetUp) Green else MaterialTheme.colorScheme.error)
@@ -563,6 +563,10 @@ private fun Overview(s: RouterSnapshot, updatedAt: Long, offerCard: (@Composable
             InfoRow(stringResource(R.string.link_type), listOf(s.linkType, s.encapsulation).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "—" })
             InfoRow(stringResource(R.string.dns), s.dns.ifEmpty { "—" })
             InfoRow(stringResource(R.string.connected_for), durationText(s.internetUptime))
+            // Последний обрыв и число за сутки; подробности — на вкладке «Журнал». Пока обрывов не было, строки нет.
+            drops.firstOrNull()?.let {
+                InfoRow(stringResource(R.string.drops_title), stringResource(R.string.overview_drops_value, dropWhenText(it, seconds = false), dropsWithin(drops, updatedAt / 1000, 86400)))
+            }
         }
         SectionCard(stringResource(R.string.section_network)) {
             InfoRow(stringResource(R.string.devices_online), s.devices.count { it.online }.toString())
@@ -1325,7 +1329,8 @@ private fun severityColor(s: String): Color = when (s) {
 @Composable
 private fun LogScreen(s: UiState, vm: RouterViewModel) {
     val log = s.log
-    var showStats by rememberSaveable { mutableStateOf(true) }
+    var view by rememberSaveable { mutableStateOf(LogView.STATS) }
+    var openDrop by rememberSaveable { mutableStateOf<Long?>(null) }
     var period by rememberSaveable { mutableStateOf(LogPeriod.DAY) }
     var query by rememberSaveable { mutableStateOf("") }
     var severity by rememberSaveable { mutableStateOf("") }
@@ -1333,15 +1338,36 @@ private fun LogScreen(s: UiState, vm: RouterViewModel) {
     val scheme = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SegmentedTwo(stringResource(R.string.log_stats), stringResource(R.string.log_entries), showStats, Modifier.weight(1f)) { showStats = it }
+            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(view == LogView.STATS, { view = LogView.STATS }, { Text(stringResource(R.string.log_stats)) })
+                FilterChip(view == LogView.ENTRIES, { view = LogView.ENTRIES }, { Text(stringResource(R.string.log_entries)) })
+                FilterChip(view == LogView.DROPS, { view = LogView.DROPS }, { Text(stringResource(R.string.log_drops)) })
+            }
             IconButton({ vm.loadLog() }) { Icon(Icons.Default.Refresh, stringResource(R.string.refresh)) }
         }
-        if (showStats) {
+        if (view == LogView.DROPS) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (s.drops.isEmpty()) item { Text(stringResource(R.string.drops_none), Modifier.padding(16.dp, 8.dp)) }
+                else item {
+                    Text(
+                        stringResource(R.string.drops_counts, dropsWithin(s.drops, s.updatedAt / 1000, 86400), dropsWithin(s.drops, s.updatedAt / 1000, 7 * 86400), s.drops.size),
+                        Modifier.padding(16.dp, 4.dp), fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                itemsIndexed(s.drops, key = { _, d -> d.at }) { i, d ->
+                    DropRow(d, latest = i == 0) { openDrop = d.at }
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                }
+                item { SectionHint(stringResource(R.string.drops_hint)) }
+            }
+        } else if (view == LogView.STATS) {
             // Сводки считаются один раз на журнал, а не при каждой перерисовке (опрос обновляет экран каждые 15 секунд).
             val aggregated = remember(log, period) { logAggregate(log, period) }
             val bySeverity = remember(log) { logCountsBy(log) { it.severity } }
             val byCategory = remember(log) { logCountsBy(log) { it.category }.take(10) }
             LazyColumn(Modifier.fillMaxSize()) {
+                // Обрывы связи — первым блоком: ради них журнал обычно и открывают.
+                item { DropsSummaryCard(s.drops, s.updatedAt / 1000, onShowAll = { view = LogView.DROPS }) { openDrop = it.at } }
                 item { Text(stringResource(R.string.log_total, log.size), Modifier.padding(16.dp, 4.dp), fontWeight = FontWeight.SemiBold) }
                 item {
                     // Переключатель периода стоит под заголовком раздела, которым он управляет.
@@ -1365,13 +1391,19 @@ private fun LogScreen(s: UiState, vm: RouterViewModel) {
                 items(byCategory) { c -> DetailRow(c.label, c.count.toString(), Modifier.padding(horizontal = 16.dp)) }
             }
         } else {
-            val entries = log.filter { (severity.isEmpty() || severityGroup(it.severity) == severity) && (query.isEmpty() || it.raw.contains(query, ignoreCase = true)) }
+            val entries = remember(log, severity, query) {
+                log.filter { e ->
+                    (severity.isEmpty() || (if (severity == LINK_FILTER) classifyLinkEvent(e) != null else severityGroup(e.severity) == severity)) &&
+                        (query.isEmpty() || e.raw.contains(query, ignoreCase = true))
+                }
+            }
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 SearchField(query, { query = it }, stringResource(R.string.log_search))
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(
                         "" to stringResource(R.string.log_all), "err" to stringResource(R.string.log_level_err), "warning" to stringResource(R.string.log_level_warning),
                         "notice" to stringResource(R.string.log_level_notice), "info" to stringResource(R.string.log_level_info), "debug" to stringResource(R.string.log_level_debug),
+                        LINK_FILTER to stringResource(R.string.log_filter_link),
                     ).forEach { (v, l) ->
                         FilterChip(severity == v, { severity = v }, { Text(l) })
                     }
@@ -1380,8 +1412,17 @@ private fun LogScreen(s: UiState, vm: RouterViewModel) {
             if (entries.isEmpty()) SectionHint(stringResource(R.string.log_empty))
             LazyColumn(Modifier.fillMaxSize()) {
                 items(entries, key = { it.id }) { e ->
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    // Строки о потере и возврате связи выделены фоном и подписью: цвет — не единственный признак.
+                    val loss = remember(e.raw) { dropLineIsLoss(e) }
+                    val tint = when (loss) { true -> scheme.errorContainer.copy(alpha = 0.5f); false -> Green.copy(alpha = 0.12f); null -> Color.Transparent }
+                    Column(Modifier.fillMaxWidth().background(tint).padding(horizontal = 16.dp, vertical = 6.dp)) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (loss != null) {
+                                Text(
+                                    stringResource(if (loss) R.string.label_link_lost else R.string.label_link_restored),
+                                    color = if (loss) scheme.error else Green, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
+                                )
+                            }
                             Text(e.category, color = scheme.primary, style = MaterialTheme.typography.labelSmall)
                             Text(e.severity, color = severityColor(e.severity), style = MaterialTheme.typography.labelSmall)
                             Text("${dayMonthText(e.day, e.month, currentLocale())} ${e.time}", color = scheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
@@ -1393,12 +1434,12 @@ private fun LogScreen(s: UiState, vm: RouterViewModel) {
             }
         }
     }
+    val opened = s.drops.indexOfFirst { it.at == openDrop }
+    if (opened >= 0) DropDetailsDialog(s.drops[opened], latest = opened == 0) { openDrop = null }
 }
 
-@Composable
-private fun SegmentedTwo(a: String, b: String, first: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
-    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        FilterChip(first, { onChange(true) }, { Text(a) })
-        FilterChip(!first, { onChange(false) }, { Text(b) })
-    }
-}
+/** Что показывает вкладка «Журнал»: сводки, записи или обрывы связи. */
+private enum class LogView { STATS, ENTRIES, DROPS }
+
+/** Значение фильтра записей «только про связь с провайдером» (рядом с уровнями важности). */
+private const val LINK_FILTER = "link"
