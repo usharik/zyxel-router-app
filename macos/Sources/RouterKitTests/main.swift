@@ -276,5 +276,73 @@ do {
     check(false, "восстановление: ошибка должна дойти")
 } catch { check(relogins == 0 && calls == 1, "восстановление: прочие ошибки без повторного входа") }
 
+// MARK: Диагностика
+let pingOut = """
+--- 1.1.1.1 ping statistics ---
+30 packets transmitted, 27 packets received, 10.0% packet loss
+round-trip min/avg/max/stddev = 9.1/11.0/21.9/3.2 ms
+"""
+let ping = parsePing(pingOut)
+eq(ping?.received, 27, "ping: получено")
+check(abs((ping?.lossPercent ?? 0) - 10) < 0.01, "ping: потери 10%")
+eq(ping?.avgMs, 11.0, "ping: среднее")
+eq(parsePing("ping: cannot resolve")?.sent, nil, "ping: мусор → nil")
+eq(parsePing("5 packets transmitted, 0 packets received, 100.0% packet loss")?.lossPercent, 100, "ping: без ответа")
+let digOut = ";; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 1\n;; Query time: 19 msec\n"
+eq(parseDig(digOut).status, "NXDOMAIN", "dig: статус"); eq(parseDig(digOut).ms, 19, "dig: время")
+check(parseDig(digOut).ok, "dig: NXDOMAIN считается рабочим DNS")
+check(!parseDig(";; connection timed out; no servers could be reached").ok, "dig: таймаут")
+
+if let card = loadFixture("cardpage_status"), let lan = loadFixture("lanhosts") {
+    let cardObj = (card["Object"] as? [[String: Any]])?.first ?? [:]
+    let lanObj = (lan["Object"] as? [[String: Any]])?.first ?? [:]
+    let traffic: [String: Any] = [
+        "ipIface": [["Name": "LAN", "Status": "Up", "LowerLayers": "Ethernet.Link.1"], ["Name": "WAN", "Status": "Up", "LowerLayers": "PPP.Interface.1"]],
+        "ipIfaceSt": [["ErrorsReceived": 0], [:]],
+        "pppIfaceSt": [["BytesReceived": 5_000_000, "BytesSent": 1_000_000, "PacketsReceived": 900, "PacketsSent": 100]],
+        "ethIface": [["X_ZYXEL_LanPort": "LAN1", "Status": "Up", "CurrentBitRate": 10, "MaxBitRate": 1000, "DuplexMode": "Full"],
+                     ["X_ZYXEL_LanPort": "LAN2", "Status": "Down", "CurrentBitRate": 0, "MaxBitRate": 1000, "DuplexMode": "Auto"]],
+        "ethIfaceSt": [["ErrorsReceived": 0], [:]],
+        "wifiRadio": [["OperatingFrequencyBand": "2.4GHz", "Enable": true, "Status": "Up", "Channel": 1]],
+    ]
+    let now = Date(timeIntervalSince1970: 1_794_470_400)
+    let input = RouterDiagInput(status: cardObj, hosts: lanObj, traffic: traffic,
+                                mgmt: [["Name": "HTTPS", "Mode": "LAN_ONLY", "Port": 443], ["Name": "SSH", "Mode": "LAN_WAN", "Port": 22]],
+                                firewall: ["Enable": true, "enableDos": true, "Level_GUI": "Low"], time: [:], parental: nil,
+                                systemLog: [], securityLog: [])
+    // Первый запуск: базовая линия устройств, без «новых устройств».
+    let first = diagnose(router: input, routerError: nil, local: LocalProbe(), history: [], knownDevices: [:], routerAddress: "192.168.1.1", now: now)
+    check(first.findings.contains { $0.area == "Порты LAN" && $0.text.contains("LAN1") && $0.level == .warn }, "диагностика: LAN1 на 10 Мбит/с")
+    check(!first.findings.contains { $0.text.contains("LAN2") }, "диагностика: выключенный порт не оценивается")
+    check(first.findings.contains { $0.level == .crit && $0.text.contains("SSH:22") }, "диагностика: управление из интернета — критично")
+    check(!first.findings.contains { $0.area == "Устройства" }, "диагностика: первый запуск без новых устройств")
+    check(!first.knownDevices.isEmpty, "диагностика: устройства запомнены")
+    eq(first.metrics.wanRx, 5_000_000, "диагностика: байты WAN берутся с PPP-интерфейса")
+    check(first.metrics.dslDown > 0, "диагностика: синхронизация DSL из фикстуры")
+    check(!renderMarkdown(first).contains("<redacted>"), "диагностика: в отчёт не попадают скрытые поля")
+
+    // Второй запуск через сутки: роутер работает меньше суток → перезагрузка; одно устройство «забыто» → новое.
+    var prev = first.metrics
+    prev.date = now.timeIntervalSince1970 - 86400
+    prev.dslDown = first.metrics.dslDown * 2
+    var known = first.knownDevices
+    let forgotten = known.keys.sorted().first!
+    known.removeValue(forKey: forgotten)
+    let second = diagnose(router: input, routerError: nil, local: LocalProbe(), history: [prev, prev, prev], knownDevices: known,
+                          routerAddress: "192.168.1.1", now: now.addingTimeInterval(Double(Field_uptime(cardObj)) + 3600))
+    check(second.findings.contains { $0.area == "Система" && $0.text.contains("перезагружался") }, "диагностика: перезагрузка обнаружена")
+    check(second.findings.contains { $0.area == "Устройства" && $0.text.contains(forgotten) }, "диагностика: новое устройство")
+    check(second.findings.contains { $0.area == "DSL" && $0.text.contains("упала") }, "диагностика: падение синхронизации DSL")
+
+    let down = diagnose(router: nil, routerError: "нет связи", local: LocalProbe(), history: [], knownDevices: [:], routerAddress: "192.168.1.1", now: now)
+    eq(down.level, .crit, "диагностика: роутер недоступен — критично")
+    check(!down.metrics.routerReachable, "диагностика: недоступный роутер не помечен доступным")
+}
+func Field_uptime(_ status: [String: Any]) -> Int { ((status["DeviceInfo"] as? [String: Any])?["UpTime"] as? Int) ?? 0 }
+
+let entry = parseLog(["[attack] Dec 31 23:00:00 kern.alert kernel: UDP PORT SCAN ATTACK:IN=ppp2"]).first!
+let jan = DateComponents(calendar: Calendar.current, year: 2027, month: 1, day: 1, hour: 1).date!
+eq(logDate(entry, now: jan).map { Calendar.current.component(.year, from: $0) }, 2026, "журнал: запись 31 дек в январе относится к прошлому году")
+
 print("\n==== \(failures == 0 ? "ВСЕ ТЕСТЫ ПРОЙДЕНЫ" : "ПРОВАЛЕНО: \(failures)") ====")
 exit(failures == 0 ? 0 : 1)
