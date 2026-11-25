@@ -361,4 +361,11 @@
         <item quantity="many">%d потерь связи подряд</item>
         <item quantity="other">%d потери связи подряд</item>
     </plurals>
+    <string name="internet_access">Доступ в интернет</string>
+    <string name="block_internet">Заблокировать интернет</string>
+    <string name="unblock_internet">Разблокировать интернет</string>
+    <string name="block">Заблокировать</string>
+    <string name="block_confirm_title">Заблокировать интернет для %1$s?</string>
+    <string name="block_confirm_text">Устройство останется в домашней сети, но не сможет выйти в интернет, пока вы не снимете блокировку здесь или в настройках роутера.</string>
+    <string name="err_device_not_found">Устройства уже нет в списке роутера; обновите список.</string>
 </resources>

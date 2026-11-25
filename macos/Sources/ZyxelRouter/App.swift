@@ -219,7 +219,10 @@ struct DeviceDetailView: View {
     }
 
     var body: some View {
-        let d = device
+        // Свежие данные из снимка: после блокировки отметка и кнопка должны смениться, не закрывая окно.
+        let live = model.snapshot?.devices.first { $0.mac == device.mac }
+        let d = live ?? device
+        let blocking = model.blockingMacs.contains(d.mac)
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: d.typeIcon).font(.largeTitle).foregroundStyle(.tint)
@@ -238,7 +241,7 @@ struct DeviceDetailView: View {
                     row("MAC", d.mac)
                     if d.ipv6 { row("IPv6", "есть") }
                     row("Адрес", d.staticIP ? "статический" : "по DHCP")
-                    if d.blocked { row("Родительский контроль", "заблокирован") }
+                    if d.blocked { row("Доступ в интернет", "заблокирован") }
                 }
                 if d.connection.lowercased().contains("wi-fi") {
                     Section("Wi-Fi") {
@@ -263,7 +266,16 @@ struct DeviceDetailView: View {
             }
             .formStyle(.grouped)
             HStack {
-                if !d.online && !(model.snapshot?.devices.contains { $0.mac == d.mac } ?? false) { Button("Забыть", role: .destructive) { model.forgetDevice(d.mac); onClose() } }
+                if !d.online && live == nil { Button("Забыть", role: .destructive) { model.forgetDevice(d.mac); onClose() } }
+                // Флаг ставится только устройству из ответа роутера: запомненное приложением роутер уже не знает.
+                if live != nil && !d.mac.isEmpty {
+                    if d.blocked {
+                        Button("Разблокировать интернет") { Task { await model.setInternetBlocked(mac: d.mac, blocked: false) } }.disabled(blocking)
+                    } else {
+                        Button("Заблокировать интернет", role: .destructive) { model.confirmBlockMac = d.mac }.disabled(blocking)
+                    }
+                    if blocking { ProgressView().controlSize(.small) }
+                }
                 Spacer()
                 Button("Закрыть", action: onClose).keyboardShortcut(.defaultAction)
             }
@@ -271,6 +283,12 @@ struct DeviceDetailView: View {
         .padding(20)
         .frame(width: 480, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
+        .confirmationDialog("Заблокировать интернет для \(d.name)?", isPresented: Binding(get: { model.confirmBlockMac == d.mac }, set: { if !$0 { model.confirmBlockMac = nil } })) {
+            Button("Заблокировать", role: .destructive) { Task { await model.setInternetBlocked(mac: d.mac, blocked: true) } }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Устройство останется в домашней сети, но не сможет выйти в интернет, пока вы не снимете блокировку здесь или в настройках роутера.")
+        }
     }
 }
 

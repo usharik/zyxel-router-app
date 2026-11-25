@@ -361,4 +361,11 @@
         <item quantity="many">%d втрат зв\'язку поспіль</item>
         <item quantity="other">%d втрати зв\'язку поспіль</item>
     </plurals>
+    <string name="internet_access">Доступ до інтернету</string>
+    <string name="block_internet">Заблокувати інтернет</string>
+    <string name="unblock_internet">Розблокувати інтернет</string>
+    <string name="block">Заблокувати</string>
+    <string name="block_confirm_title">Заблокувати інтернет для %1$s?</string>
+    <string name="block_confirm_text">Пристрій залишиться в домашній мережі, але не зможе вийти в інтернет, доки ви не знімете блокування тут або в налаштуваннях роутера.</string>
+    <string name="err_device_not_found">Пристрою вже немає в списку роутера; оновіть список.</string>
 </resources>

@@ -494,5 +494,25 @@ do {
     eq(formatShortDuration(38), "38 с", "обрывы: короткая длительность"); eq(formatShortDuration(120), "2 мин 0 с", "обрывы: длительность в минутах")
 }
 
+// MARK: блокировка интернета (PUT oid=lanhosts, как в веб-интерфейсе)
+do {
+    let host: [String: Any] = ["curHostName": "", "DeviceName": "device-75", "HostName": "device-75", "icon": "ipc", "DeviceIcon": "", "PhysAddress": "14:33:75:00:00:0B"]
+    let body = internetBlockingBody(host, blocked: true)
+    eq(Set(body.keys), ["HostName", "DeviceIcon", "MacAddress", "Internet_Blocking_Enable"], "блокировка: ровно поля веб-интерфейса")
+    eq(body["HostName"] as? String, "device-75", "блокировка: пустой curHostName — имя из DeviceName")
+    eq(body["DeviceIcon"] as? String, "ipc", "блокировка: иконка из icon, а не из пустого DeviceIcon")
+    eq(body["MacAddress"] as? String, "14:33:75:00:00:0B", "блокировка: MAC в поле MacAddress")
+    eq(body["Internet_Blocking_Enable"] as? Bool, true, "блокировка: флаг")
+    eq(internetBlockingBody(host, blocked: false)["Internet_Blocking_Enable"] as? Bool, false, "блокировка: снятие")
+    var custom = host; custom["curHostName"] = "MacBook &amp; Co"; custom["icon"] = "Weird"
+    let cb = internetBlockingBody(custom, blocked: true)
+    eq(cb["HostName"] as? String, "MacBook &amp; Co", "блокировка: имя уходит как пришло, с сущностями")
+    eq(cb["DeviceIcon"] as? String, "iothers", "блокировка: незнакомая иконка — iothers")
+    if let lan = loadFixture("lanhosts"), let obj = (lan["Object"] as? [[String: Any]])?.first {
+        let all = ((obj["lanhosts"] as? [[String: Any]]) ?? []).map { internetBlockingBody($0, blocked: true) }
+        check(!all.isEmpty && all.allSatisfy { !(($0["HostName"] as? String) ?? "").isEmpty && (($0["DeviceIcon"] as? String) ?? "").hasPrefix("i") }, "блокировка: у всех реальных устройств есть имя и иконка")
+    }
+}
+
 print("\n==== \(failures == 0 ? "ВСЕ ТЕСТЫ ПРОЙДЕНЫ" : "ПРОВАЛЕНО: \(failures)") ====")
 exit(failures == 0 ? 0 : 1)

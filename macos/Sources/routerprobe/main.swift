@@ -57,6 +57,29 @@ print("routing: static=\(r.staticRoutes.count) dns=\(r.dnsRoutes.count) policy=\
 for s in r.staticRoutes { print("  static:", s.title, "|", s.subtitle, s.enabled) }
 for s in r.policyRoutes { print("  policy:", s.title, "|", s.subtitle) }
 for s in r.rip { print("  rip:", s.title, "|", s.subtitle) }
+// Обратимая проверка блокировки интернета: ROUTER_BLOCK=<часть имени устройства>. Флаг ставится противоположным,
+// проверяется, что имя не изменилось, и возвращается исходное значение.
+if let match = ProcessInfo.processInfo.environment["ROUTER_BLOCK"], !match.isEmpty {
+    guard let d = s.devices.first(where: { $0.name.localizedCaseInsensitiveContains(match) }) else { print("block: no device matching \(match)"); exit(3) }
+    print("block: device=\(d.name) mac=\(d.mac) blocked=\(d.blocked)")
+    // ROUTER_BLOCK_SET=1|0 — только поставить значение и выйти (проверка изнутри устройства, затем снять тем же способом).
+    if let set = ProcessInfo.processInfo.environment["ROUTER_BLOCK_SET"] {
+        try await client.setInternetBlocked(mac: d.mac, blocked: set == "1")
+        let now = try await client.snapshot().devices.first { $0.mac == d.mac }
+        print("block: set blocked=\(now?.blocked.description ?? "?") name=\(now?.name ?? "?")")
+        await client.logout()
+        exit(0)
+    }
+    try await client.setInternetBlocked(mac: d.mac, blocked: !d.blocked)
+    let after = try await client.snapshot().devices.first { $0.mac == d.mac }
+    print("block: after toggle blocked=\(after?.blocked ?? d.blocked) name=\(after?.name ?? "?")")
+    try await client.setInternetBlocked(mac: d.mac, blocked: d.blocked)
+    let restored = try await client.snapshot().devices.first { $0.mac == d.mac }
+    print("block: restored blocked=\(restored?.blocked ?? !d.blocked) name=\(restored?.name ?? "?")")
+    let ok = after?.blocked == !d.blocked && restored?.blocked == d.blocked && after?.name == d.name && restored?.name == d.name
+    print("block:", ok ? "OK" : "MISMATCH")
+    if !ok { exit(4) }
+}
 if ProcessInfo.processInfo.environment["ROUTER_REBOOT"] == "1" { try await client.reboot(); print("reboot ok") }
 await client.logout()
 print("logout ok")

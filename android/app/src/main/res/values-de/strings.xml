@@ -349,4 +349,11 @@
         <item quantity="one">%d Abbruch</item>
         <item quantity="other">%d Abbrüche hintereinander</item>
     </plurals>
+    <string name="internet_access">Internetzugang</string>
+    <string name="block_internet">Internet sperren</string>
+    <string name="unblock_internet">Internet entsperren</string>
+    <string name="block">Sperren</string>
+    <string name="block_confirm_title">Internet für %1$s sperren?</string>
+    <string name="block_confirm_text">Das Gerät bleibt im Heimnetz, erreicht aber das Internet nicht, bis Sie die Sperre hier oder in den Router-Einstellungen aufheben.</string>
+    <string name="err_device_not_found">Das Gerät ist nicht mehr in der Liste des Routers; aktualisieren Sie die Liste.</string>
 </resources>

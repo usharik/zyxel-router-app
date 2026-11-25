@@ -81,6 +81,10 @@ final class AppModel: ObservableObject {
     @Published var editError: String?
     @Published var editSaving = false
     @Published var confirmDeleteIndex: Int?
+    /// MAC устройств, у которых идёт запись блокировки интернета: кнопка неактивна до ответа роутера.
+    @Published var blockingMacs: Set<String> = []
+    /// Устройство, для которого открыто подтверждение блокировки.
+    @Published var confirmBlockMac: String?
 
     private var client: RouterClient?
     private var pollTask: Task<Void, Never>?
@@ -317,6 +321,26 @@ final class AppModel: ObservableObject {
             }
             banner = nil
         } catch { await writeFailed(error, client) }
+    }
+
+    /// Блокирует или разрешает устройству интернет; после записи перечитывает снимок, чтобы показать принятое роутером.
+    func setInternetBlocked(mac: String, blocked: Bool) async {
+        guard let client, !blockingMacs.contains(mac) else { return }
+        blockingMacs.insert(mac)
+        defer { blockingMacs.remove(mac) }
+        do {
+            // Флаг ставится, а не переключается, поэтому запись можно повторить после нового входа.
+            let fresh = try await recovering(client) {
+                try await client.setInternetBlocked(mac: mac, blocked: blocked)
+                return try await client.snapshot()
+            }
+            if self.client === client { snapshot = fresh; updated = Date() }
+            banner = nil
+        } catch {
+            if sessionLost(error) { return }
+            writeError = error.localizedDescription
+            banner = writeError
+        }
     }
 
     func openNewProfile() {

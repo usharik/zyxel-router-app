@@ -84,6 +84,8 @@ data class UiState(
     val writingParental: Set<Int> = emptySet(),
     /** Сколько разделов маршрутов уже прочитано из [ROUTING_PARTS]. */
     val routingProgress: Int = 0,
+    /** Устройства (MAC), у которых идёт запись блокировки интернета: их кнопка неактивна до ответа роутера. */
+    val blockingDevices: Set<String> = emptySet(),
     val refreshing: Boolean = false,   // обновление по кнопке; фоновый опрос индикатор не показывает
     val saveState: SaveState = SaveState.Idle,
     val rebooting: Boolean = false,
@@ -121,10 +123,11 @@ class RouterViewModel(
         // нового входа. Обработчик вызывается на главном потоке (область сессии — viewModelScope).
         parentalWrites = 0
         writing.clear()
+        pendingBlocks.clear()
         state.update {
             it.copy(
                 banner = text(RouterException.BadResponse), sectionsBusy = emptySet(), refreshing = false, deletingProfiles = emptySet(),
-                writingParental = emptySet(), saveState = if (it.saveState == SaveState.InFlight) SaveState.Failed(text(RouterException.BadResponse)) else it.saveState,
+                writingParental = emptySet(), blockingDevices = emptySet(), saveState = if (it.saveState == SaveState.InFlight) SaveState.Failed(text(RouterException.BadResponse)) else it.saveState,
                 discovery = if (it.discovery == DiscoveryStatus.Running) DiscoveryStatus.Idle else it.discovery,
             )
         }
@@ -150,6 +153,11 @@ class RouterViewModel(
      * удалением и перечитыванием списка, могла бы попасть в другой профиль.
      */
     private val parentalQueue = Mutex()
+    /**
+     * Блокировки интернета, ещё не подтверждённые роутером: MAC → новое значение. Фоновый опрос, снятый до записи,
+     * иначе вернул бы старый флаг, и отметка «заблок.» мигнула бы. Только с главного потока.
+     */
+    private val pendingBlocks = mutableMapOf<String, Boolean>()
     private var writeError: String? = null   // текст ошибки записи; держится, пока запись не пройдёт или баннер не закроют
 
     private val breaks = MutableSharedFlow<AdBreakEvent>(extraBufferCapacity = 4)
@@ -169,6 +177,7 @@ class RouterViewModel(
         client = null
         parentalWrites = 0
         writing.clear()
+        pendingBlocks.clear()
         rebootNoticeUntil = 0
         writeError = null
         lastSavedHistory = null
@@ -268,12 +277,44 @@ class RouterViewModel(
     /** Новый снимок: устройства — вместе с историей. */
     private fun applySnapshot(snapshot: RouterSnapshot) {
         val s = state.value
-        val devices = if (s.demo) snapshot.devices else historyFor(s.address).let { h ->
+        val merged = if (s.demo) snapshot.devices else historyFor(s.address).let { h ->
             persistHistory(h.record(snapshot.devices, System.currentTimeMillis() / 1000))
             h.merge(snapshot.devices)
         }
+        val devices = withPendingBlocks(merged)
         state.update { it.copy(snapshot = snapshot, devices = devices, updatedAt = System.currentTimeMillis(), banner = bannerAfterRefresh(null, it.banner)) }
         updateVendors()
+    }
+
+    private fun withPendingBlocks(devices: List<RouterDevice>): List<RouterDevice> =
+        if (pendingBlocks.isEmpty()) devices else devices.map { d -> pendingBlocks[d.mac]?.let { d.copy(blocked = it) } ?: d }
+
+    /**
+     * Блокирует или разрешает устройству интернет флагом роутера. Отметка в списке меняется сразу, при отказе
+     * роутера возвращается; после записи снимок перечитывается, чтобы показать то, что роутер принял.
+     */
+    fun setInternetBlocked(mac: String, blocked: Boolean) {
+        val c = client ?: return
+        if (mac.isEmpty() || mac in state.value.blockingDevices) return
+        pendingBlocks[mac] = blocked
+        state.update { it.copy(blockingDevices = it.blockingDevices + mac, devices = withPendingBlocks(it.devices)) }
+        session.launch {
+            try {
+                // Флаг ставится, а не переключается, поэтому запись можно повторить после нового входа.
+                val snapshot = recovering(c) { c.setInternetBlocked(mac, blocked); c.snapshot() }
+                writeError = null
+                pendingBlocks.remove(mac)
+                if (client === c) applySnapshot(snapshot)
+                Telemetry.event("internet_blocking_set", mapOf("blocked" to blocked))
+            } catch (e: RouterException) {
+                pendingBlocks.remove(mac)
+                if (sessionLost(e)) return@launch
+                writeError = text(e)
+                state.update { st -> st.copy(banner = text(e), devices = st.devices.map { if (it.mac == mac) it.copy(blocked = !blocked) else it }) }
+            } finally {
+                if (client === c) state.update { it.copy(blockingDevices = it.blockingDevices - mac) }
+            }
+        }
     }
 
     fun forgetDevice(mac: String) {
@@ -469,7 +510,7 @@ class RouterViewModel(
             it.copy(
                 phase = Phase.MAIN, demo = demo, busy = false, loginStep = null, banner = null, identities = identities, discovery = DiscoveryStatus.Idle, knownRouter = !demo || it.knownRouter,
                 parental = null, routing = null, log = null, drops = dropLog.drops.asReversed(), sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false,
-                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), refreshing = false,
+                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), refreshing = false,
             )
         }
         applySnapshot(snapshot)
@@ -514,7 +555,7 @@ class RouterViewModel(
             it.copy(
                 phase = Phase.LOGIN, snapshot = null, devices = emptyList(), identities = emptyMap(), discovery = DiscoveryStatus.Idle, parental = null, routing = null, log = null, drops = emptyList(), sectionErrors = emptyMap(),
                 error = text(e), busy = false, loginStep = null, saveState = SaveState.Idle, rebooting = false, demo = false,
-                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), refreshing = false,
+                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), refreshing = false,
                 certificateFingerprint = (e as? RouterException.CertificateChanged)?.fingerprint,
             )
         }
@@ -769,7 +810,7 @@ class RouterViewModel(
             it.copy(
                 phase = Phase.LOGIN, password = if (s.demo) it.password else "", snapshot = null, devices = emptyList(), identities = emptyMap(), discovery = DiscoveryStatus.Idle, parental = null, routing = null,
                 log = null, drops = emptyList(), sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false, banner = null, error = null, demo = false,
-                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), refreshing = false,
+                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), refreshing = false,
             )
         }
         if (c != null && !s.demo) viewModelScope.launch(Dispatchers.IO) { c.logout() }

@@ -361,4 +361,11 @@
         <item quantity="many">%d ztráty spojení za sebou</item>
         <item quantity="other">%d ztrát spojení za sebou</item>
     </plurals>
+    <string name="internet_access">Přístup k internetu</string>
+    <string name="block_internet">Zablokovat internet</string>
+    <string name="unblock_internet">Odblokovat internet</string>
+    <string name="block">Zablokovat</string>
+    <string name="block_confirm_title">Zablokovat internet pro %1$s?</string>
+    <string name="block_confirm_text">Zařízení zůstane v domácí síti, ale do internetu se nedostane, dokud blokování nezrušíte zde nebo v nastavení routeru.</string>
+    <string name="err_device_not_found">Zařízení už v seznamu routeru není; obnovte seznam.</string>
 </resources>

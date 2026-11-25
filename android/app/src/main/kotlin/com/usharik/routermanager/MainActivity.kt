@@ -808,7 +808,13 @@ private fun Devices(state: UiState, vm: RouterViewModel) {
     val liveMacs = s.devices.map { it.mac }.toSet()
     all.firstOrNull { deviceKey(it) == selectedKey }?.let { d ->
         // Пока устройство есть в ответе роутера, «забыть» бессмысленно: следующий опрос вернёт его в историю.
-        DeviceDetailsDialog(d, state.vendors[d.mac], state.identities[d.mac], onForget = if (!d.online && d.mac !in liveMacs && !state.demo) ({ vm.forgetDevice(d.mac); selectedKey = null }) else null) { selectedKey = null }
+        DeviceDetailsDialog(
+            d, state.vendors[d.mac], state.identities[d.mac],
+            onForget = if (!d.online && d.mac !in liveMacs && !state.demo) ({ vm.forgetDevice(d.mac); selectedKey = null }) else null,
+            // Флаг ставится только устройству из ответа роутера: запомненное приложением роутер уже не знает.
+            onBlock = if (d.mac.isNotEmpty() && d.mac in liveMacs) ({ blocked -> vm.setInternetBlocked(d.mac, blocked) }) else null,
+            blocking = d.mac in state.blockingDevices,
+        ) { selectedKey = null }
     }
 }
 
@@ -889,9 +895,23 @@ private fun DetailRow(label: String, value: String, modifier: Modifier = Modifie
 }
 
 @Composable
-internal fun DeviceDetailsDialog(d: RouterDevice, vendor: String?, identity: NetworkIdentity?, onForget: (() -> Unit)? = null, onClose: () -> Unit) {
+internal fun DeviceDetailsDialog(
+    d: RouterDevice, vendor: String?, identity: NetworkIdentity?, onForget: (() -> Unit)? = null,
+    onBlock: ((blocked: Boolean) -> Unit)? = null, blocking: Boolean = false, onClose: () -> Unit,
+) {
     var showAll by rememberSaveable { mutableStateOf(false) }
+    var confirmBlock by rememberSaveable { mutableStateOf(false) }
     TrackOverlay()
+    if (confirmBlock && onBlock != null) {
+        AlertDialog(
+            onDismissRequest = { confirmBlock = false },
+            confirmButton = { TextButton({ confirmBlock = false; onBlock(true) }) { Text(stringResource(R.string.block), color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton({ confirmBlock = false }) { Text(stringResource(R.string.cancel)) } },
+            icon = { Icon(Icons.Default.Block, null) },
+            title = { Text(stringResource(R.string.block_confirm_title, d.name), style = MaterialTheme.typography.titleMedium) },
+            text = { Text(stringResource(R.string.block_confirm_text)) },
+        )
+    }
     AlertDialog(
         onDismissRequest = onClose,
         confirmButton = { TextButton(onClose) { Text(stringResource(R.string.close)) } },
@@ -914,7 +934,22 @@ internal fun DeviceDetailsDialog(d: RouterDevice, vendor: String?, identity: Net
                 }
                 if (d.ipv6) DetailRow(stringResource(R.string.ipv6), stringResource(R.string.yes))
                 DetailRow(stringResource(R.string.address_kind), if (d.staticIP) stringResource(R.string.address_static) else stringResource(R.string.address_dhcp))
-                if (d.blocked) DetailRow(stringResource(R.string.parental_control), stringResource(R.string.blocked_full))
+                if (d.blocked) DetailRow(stringResource(R.string.internet_access), stringResource(R.string.blocked_full))
+                if (onBlock != null) {
+                    // Блокировка — с подтверждением, снятие — сразу: вернуть интернет никогда не вредно.
+                    OutlinedButton(
+                        { if (d.blocked) onBlock(false) else confirmBlock = true },
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp).heightIn(min = 48.dp), enabled = !blocking,
+                    ) {
+                        if (blocking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Icon(if (d.blocked) Icons.Default.Public else Icons.Default.Block, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (d.blocked) stringResource(R.string.unblock_internet) else stringResource(R.string.block_internet),
+                            color = if (d.blocked || blocking) Color.Unspecified else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
                 if (d.connection.contains("wi-fi", ignoreCase = true)) {
                     if (d.signal > 0) DetailRow(stringResource(R.string.signal), "▮".repeat(d.signal) + "▯".repeat((5 - d.signal).coerceAtLeast(0)))
                     if (d.snr > 0) DetailRow(stringResource(R.string.snr), stringResource(R.string.snr_value, d.snr))

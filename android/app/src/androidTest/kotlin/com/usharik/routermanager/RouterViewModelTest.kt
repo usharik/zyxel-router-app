@@ -78,6 +78,11 @@ class RouterViewModelTest {
             demo.saveProfile(index, name, macs, days, timeRangeList, enabled)
         }
         override fun deleteProfile(index: Int) = demo.deleteProfile(index)
+        var blockError: RouterException? = null
+        override fun setInternetBlocked(mac: String, blocked: Boolean) {
+            blockError?.let { throw it }
+            demo.setInternetBlocked(mac, blocked)
+        }
         override fun routing(onProgress: (done: Int) -> Unit): Routing {
             routingError?.let { throw it }
             (1..ROUTING_PARTS).forEach(onProgress)
@@ -172,6 +177,22 @@ class RouterViewModelTest {
         waitFor("экран входа после отказа") { it.phase == Phase.LOGIN }
         assertEquals(2, router.logins.get())
         assertTrue(vm.state.value.error!!.isNotEmpty())
+    }
+
+    @Test fun internetBlockingAppliesAndRollsBack() {
+        signIn()
+        val phone = vm.state.value.devices.first { it.name == "Phone" }
+        assertFalse(phone.blocked)
+        onMain { vm.setInternetBlocked(phone.mac, true) }
+        waitFor("блокировка принята роутером") { s -> phone.mac !in s.blockingDevices && s.devices.first { it.mac == phone.mac }.blocked }
+        assertTrue("в снимке роутера тоже", vm.state.value.snapshot!!.devices.first { it.mac == phone.mac }.blocked)
+
+        router.blockError = RouterException.WriteRejected("lanhosts", 200)
+        onMain { vm.setInternetBlocked(phone.mac, false) }
+        waitFor("отказ показан, отметка вернулась") { s -> phone.mac !in s.blockingDevices && s.banner != null && s.devices.first { it.mac == phone.mac }.blocked }
+        router.blockError = null
+        onMain { vm.setInternetBlocked(phone.mac, false) }
+        waitFor("снятие блокировки") { s -> phone.mac !in s.blockingDevices && !s.devices.first { it.mac == phone.mac }.blocked }
     }
 
     @Test fun sectionErrorOffersRetry() {

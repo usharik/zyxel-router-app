@@ -349,4 +349,11 @@
         <item quantity="one">lost %d time</item>
         <item quantity="other">lost %d times in a row</item>
     </plurals>
+    <string name="internet_access">Internet access</string>
+    <string name="block_internet">Block internet</string>
+    <string name="unblock_internet">Unblock internet</string>
+    <string name="block">Block</string>
+    <string name="block_confirm_title">Block internet for %1$s?</string>
+    <string name="block_confirm_text">The device stays on your home network but can’t reach the internet until you unblock it here or in the router settings.</string>
+    <string name="err_device_not_found">The device is no longer in the router’s list; refresh.</string>
 </resources>

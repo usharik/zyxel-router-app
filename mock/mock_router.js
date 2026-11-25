@@ -130,7 +130,7 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
         return send(200, aesEnc(JSON.stringify([{ result: text }]), session.aes));
       }
       if (req.url === '/cgi-bin/DAL?oid=cardpage_status') return send(200, aesEnc(JSON.stringify(status), session.aes));
-      if (req.url === '/cgi-bin/DAL?oid=lanhosts') return send(200, aesEnc(JSON.stringify(hosts), session.aes));
+      if (req.method === 'GET' && req.url === '/cgi-bin/DAL?oid=lanhosts') return send(200, aesEnc(JSON.stringify(hosts), session.aes));
       const oidGet = (url.match(/\/cgi-bin\/DAL\?oid=([a-z_]+)/) || [])[1];
       if (req.method === 'GET' && oidGet && dalGet[oidGet]) return send(200, aesEnc(JSON.stringify(dalGet[oidGet]), session.aes));
       // Записи требуют CSRF и вращают ключ сессии, как настоящий роутер.
@@ -146,6 +146,16 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
           else if (req.method === 'PUT' && 'Index' in obj) { const p = parental.Object.find(x => x.Index === obj.Index); if (p) Object.assign(p, norm(obj)); }
           else if (req.method === 'POST') { const idx = Math.max(0, ...parental.Object.slice(1).map(x => x.Index)) + 1; parental.Object.push({ ...norm(obj), Index: idx }); }
           else if (req.method === 'DELETE') { const i = parental.Object.findIndex(x => x.Index === qIndex); if (i > 0) parental.Object.splice(i, 1); }
+        }
+        if (oidGet === 'lanhosts') {
+          // Блокировка интернета: веб-интерфейс шлёт ровно эти поля; без MacAddress или флага — отказ, как у роутера.
+          if (req.method !== 'PUT' || typeof obj.MacAddress !== 'string' || typeof obj.Internet_Blocking_Enable !== 'boolean' || typeof obj.HostName !== 'string')
+            return send(200, aesEnc(JSON.stringify({ result: 'ZCFG_INVALID_PARAM_VALUE' }), session.aes));
+          const h = hosts.Object[0].lanhosts.find(x => x.PhysAddress.toUpperCase() === obj.MacAddress.toUpperCase());
+          if (!h) return send(200, aesEnc(JSON.stringify({ result: 'ZCFG_NO_SUCH_OBJECT' }), session.aes));
+          h.Internet_Blocking_Enable = obj.Internet_Blocking_Enable;
+          // Имя из запроса роутер сохраняет: тесты увидят, если клиент его испортит.
+          if (obj.HostName && obj.HostName !== (h.curHostName || h.DeviceName)) h.curHostName = obj.HostName;
         }
         session.csrf = crypto.randomBytes(8).toString('hex');
         return send(200, aesEnc(JSON.stringify({ result: 'ZCFG_SUCCESS', sessionkey: session.csrf }), session.aes));

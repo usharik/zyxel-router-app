@@ -30,6 +30,8 @@ interface RouterApi {
     /** Создаёт (index == null) или изменяет профиль. */
     fun saveProfile(index: Int?, name: String, macs: List<String>, days: List<String>, timeRangeList: String, enabled: Boolean)
     fun deleteProfile(index: Int)
+    /** Блокирует или разрешает устройству доступ в интернет (флаг роутера «Internet Blocking»); [mac] — как в снимке. */
+    fun setInternetBlocked(mac: String, blocked: Boolean)
     /** Маршруты из [ROUTING_PARTS] разделов; [onProgress] — сколько уже прочитано. */
     fun routing(onProgress: (done: Int) -> Unit = {}): Routing
     fun systemLog(security: Boolean = false): List<LogEntry>
@@ -58,6 +60,7 @@ class DemoRouter(private val now: () -> Long = System::currentTimeMillis) : Rout
     override fun login(username: String, password: String, onStep: (LoginStep) -> Unit) = Unit
     override fun reloginIfUnchanged(generation: Int, username: String, password: String) = Unit
 
+    @Synchronized
     override fun snapshot(): RouterSnapshot {
         val elapsed = (now() - startedAt) / 1000
         val s = JSONObject(status.toString())
@@ -95,6 +98,13 @@ class DemoRouter(private val now: () -> Long = System::currentTimeMillis) : Rout
         val position = (1 until parental.length()).firstOrNull { parental.getJSONObject(it).optInt("Index") == index }
             ?: throw RouterException.ProfileNotFound
         parental.remove(position)
+    }
+
+    @Synchronized
+    override fun setInternetBlocked(mac: String, blocked: Boolean) {
+        val host = hosts.items("lanhosts").firstOrNull { it.optString("PhysAddress").equals(mac, ignoreCase = true) }
+            ?: throw RouterException.DeviceNotFound
+        host.put("Internet_Blocking_Enable", blocked)
     }
 
     override fun routing(onProgress: (done: Int) -> Unit): Routing {

@@ -458,6 +458,20 @@ public func anonymizedIPv6(_ value: String, sequence: Int) -> String? {
 }
 
 /// Роутер отдаёт Days строкой "Mon,Tue", а на запись подтверждённо принимает массив.
+/// Иконки, которые веб-интерфейс роутера передаёт в DeviceIcon.
+private let routerIcons: Set<String> = ["imobile", "igame", "ipc", "icamera", "itv", "iothers", "istb", "irouter", "istereo", "iprinter", "iserver", "itelephone"]
+
+/// Тело PUT `/cgi-bin/DAL?oid=lanhosts`, как его собирает веб-интерфейс роутера на странице подключённых устройств.
+/// Вместе с флагом роутер принимает имя и иконку, поэтому они передаются текущими: иначе устройство переименуется.
+/// Строки — как прислал роутер, без раскодирования сущностей: «&amp;» вернулся бы символом «&», который прошивка не принимает.
+public func internetBlockingBody(_ host: [String: Any], blocked: Bool) -> [String: Any] {
+    func raw(_ key: String) -> String { host[key] as? String ?? "" }
+    let name = [raw("curHostName"), raw("DeviceName"), raw("HostName")].first { !$0.isEmpty } ?? ""
+    let iconField = raw("icon").lowercased()
+    let icon = routerIcons.contains(iconField) ? iconField : (raw("DeviceIcon").isEmpty ? "iothers" : raw("DeviceIcon"))
+    return ["HostName": name, "DeviceIcon": icon, "MacAddress": raw("PhysAddress"), "Internet_Blocking_Enable": blocked]
+}
+
 public func daysAsArray(_ obj: [String: Any]) -> [String: Any] {
     guard let days = obj["Days"] as? String else { return obj }
     var out = obj

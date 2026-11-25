@@ -30,6 +30,7 @@ fun routerErrorText(res: Resources, e: Throwable): String = when (e) {
     is RouterException.NoData -> res.getString(R.string.err_no_data, e.oid, e.status)
     is RouterException.WriteRejected -> res.getString(R.string.err_write_rejected, e.oid, e.status)
     is RouterException.ProfileNotFound -> res.getString(R.string.err_profile_not_found)
+    is RouterException.DeviceNotFound -> res.getString(R.string.err_device_not_found)
     is RouterException.DeleteRejected -> res.getString(R.string.err_delete_rejected, e.status)
     is RouterException.LogUnavailable -> res.getString(R.string.err_log_unavailable, e.status)
     is RouterException.RebootRejected -> res.getString(R.string.err_reboot_rejected, e.status)

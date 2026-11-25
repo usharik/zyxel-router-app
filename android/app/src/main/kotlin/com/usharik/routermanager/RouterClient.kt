@@ -44,6 +44,8 @@ sealed class RouterException(message: String) : Exception(message) {
     class NoData(val oid: String, val status: Int) : RouterException("No data for $oid (HTTP $status)")
     class WriteRejected(val oid: String, val status: Int) : RouterException("Write to $oid rejected (HTTP $status)")
     object ProfileNotFound : RouterException("Profile not found")
+    /** Устройства уже нет в списке роутера: блокировать нечего. */
+    object DeviceNotFound : RouterException("Device not found")
     class DeleteRejected(val status: Int) : RouterException("Profile delete rejected (HTTP $status)")
     class LogUnavailable(val status: Int) : RouterException("Log unavailable (HTTP $status)")
     class RebootRejected(val status: Int) : RouterException("Reboot rejected (HTTP $status)")
@@ -358,7 +360,7 @@ private fun bool(v: Any?): Boolean = when (v) {
     else -> false
 }
 
-private fun JSONObject?.items(key: String): List<JSONObject> {
+internal fun JSONObject?.items(key: String): List<JSONObject> {
     val array = this?.optJSONArray(key) ?: return emptyList()
     return (0 until array.length()).mapNotNull { array.optJSONObject(it) }
 }
@@ -505,6 +507,25 @@ internal fun parseSnapshot(status: JSONObject, hosts: JSONObject): RouterSnapsho
         long(wan?.opt(if (pppoe) "pppoeConnectionUpTime" else "ipoeConnectionUpTime")),
         long(dsl?.opt("DownstreamCurrRate")), long(dsl?.opt("UpstreamCurrRate")), devices, wifi, schema,
     )
+}
+
+/** Иконки, которые веб-интерфейс роутера передаёт в DeviceIcon. */
+private val ROUTER_ICONS = setOf("imobile", "igame", "ipc", "icamera", "itv", "iothers", "istb", "irouter", "istereo", "iprinter", "iserver", "itelephone")
+
+/**
+ * Тело PUT `/cgi-bin/DAL?oid=lanhosts`, как его собирает веб-интерфейс роутера на странице подключённых устройств.
+ * Вместе с флагом роутер принимает имя и иконку, поэтому они передаются текущими: иначе устройство переименуется.
+ */
+internal fun internetBlockingBody(host: JSONObject, blocked: Boolean): JSONObject {
+    // Строки — как прислал роутер, без раскодирования сущностей: «&amp;» вернулся бы символом «&», который прошивка не принимает.
+    fun raw(key: String) = (host.opt(key) as? String).orEmpty()
+    val name = raw("curHostName").ifEmpty { raw("DeviceName") }.ifEmpty { raw("HostName") }
+    val icon = raw("icon").lowercase().takeIf { it in ROUTER_ICONS } ?: raw("DeviceIcon").ifEmpty { "iothers" }
+    return JSONObject()
+        .put("HostName", name)
+        .put("DeviceIcon", icon)
+        .put("MacAddress", raw("PhysAddress"))
+        .put("Internet_Blocking_Enable", blocked)
 }
 
 /** Роутер отдаёт Days строкой "Mon,Tue", а на запись подтверждённо принимает массив. */
@@ -751,6 +772,13 @@ class RouterClient(address: String, storedPins: CertificatePins = MemoryCertific
                 .put("URLFilter", "").put("NetworkServiceList", "")
             dalWrite("POST", "paren_ctl", obj)
         }
+    }
+
+    /** Читает устройство заново (имя и иконка могли поменяться в веб-интерфейсе) и меняет только флаг блокировки. */
+    override fun setInternetBlocked(mac: String, blocked: Boolean) {
+        val host = dal("lanhosts").items("lanhosts").firstOrNull { str(it.opt("PhysAddress")).equals(mac, ignoreCase = true) }
+            ?: throw RouterException.DeviceNotFound
+        dalWrite("PUT", "lanhosts", internetBlockingBody(host, blocked))
     }
 
     override fun deleteProfile(index: Int) {

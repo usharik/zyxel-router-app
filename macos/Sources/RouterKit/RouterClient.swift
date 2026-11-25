@@ -241,6 +241,16 @@ public actor RouterClient {
         }
     }
 
+    /// Блокирует или разрешает устройству интернет (флаг роутера «Internet Blocking»). Устройство читается заново:
+    /// имя и иконка могли поменяться в веб-интерфейсе, а роутер принимает их вместе с флагом.
+    public func setInternetBlocked(mac: String, blocked: Bool) async throws {
+        let hosts = Field.list(try await dal("lanhosts")["lanhosts"])
+        guard let host = hosts.first(where: { Field.str($0["PhysAddress"]).caseInsensitiveCompare(mac) == .orderedSame }) else {
+            throw RouterError.failed("Устройства уже нет в списке роутера; обновите список.")
+        }
+        try await dalWrite("PUT", oid: "lanhosts", obj: internetBlockingBody(host, blocked: blocked))
+    }
+
     public func deleteProfile(index: Int) async throws {
         let (status, json) = try await send("DELETE", "/cgi-bin/DAL?oid=paren_ctl&Index=\(index)")
         if [401, 403, 504].contains(status) { throw RouterError.sessionExpired }
