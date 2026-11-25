@@ -78,10 +78,13 @@ class RouterViewModelTest {
             demo.saveProfile(index, name, macs, days, timeRangeList, enabled)
         }
         override fun deleteProfile(index: Int) = demo.deleteProfile(index)
-        var blockError: RouterException? = null
+        @Volatile var blockError: RouterException? = null
+        /** Запись проходит, а чтение после неё — нет (таймаут ответа). */
+        @Volatile var failReadAfterBlock = false
         override fun setInternetBlocked(mac: String, blocked: Boolean) {
             blockError?.let { throw it }
             demo.setInternetBlocked(mac, blocked)
+            if (failReadAfterBlock) snapshotError = RouterException.Unreachable
         }
         override fun routing(onProgress: (done: Int) -> Unit): Routing {
             routingError?.let { throw it }
@@ -193,6 +196,17 @@ class RouterViewModelTest {
         router.blockError = null
         onMain { vm.setInternetBlocked(phone.mac, false) }
         waitFor("снятие блокировки") { s -> phone.mac !in s.blockingDevices && !s.devices.first { it.mac == phone.mac }.blocked }
+        assertTrue("ошибка прошлой попытки стёрта", phone.mac !in vm.state.value.blockErrors)
+    }
+
+    @Test fun acceptedBlockSurvivesFailedReread() {
+        signIn()
+        val phone = vm.state.value.devices.first { it.name == "Phone" }
+        router.failReadAfterBlock = true
+        onMain { vm.setInternetBlocked(phone.mac, true) }
+        waitFor("запись завершена") { phone.mac !in it.blockingDevices }
+        assertTrue("принятая блокировка не откатывается из-за сбоя чтения", vm.state.value.devices.first { it.mac == phone.mac }.blocked)
+        assertTrue("это не ошибка записи", phone.mac !in vm.state.value.blockErrors)
     }
 
     @Test fun sectionErrorOffersRetry() {

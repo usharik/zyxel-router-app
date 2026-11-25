@@ -60,25 +60,38 @@ for s in r.rip { print("  rip:", s.title, "|", s.subtitle) }
 // Обратимая проверка блокировки интернета: ROUTER_BLOCK=<часть имени устройства>. Флаг ставится противоположным,
 // проверяется, что имя не изменилось, и возвращается исходное значение.
 if let match = ProcessInfo.processInfo.environment["ROUTER_BLOCK"], !match.isEmpty {
-    guard let d = s.devices.first(where: { $0.name.localizedCaseInsensitiveContains(match) }) else { print("block: no device matching \(match)"); exit(3) }
+    let found = s.devices.filter { $0.name.localizedCaseInsensitiveContains(match) && !$0.mac.isEmpty }
+    guard found.count == 1, let d = found.first else {
+        print("block: need exactly one device matching \(match), found \(found.map(\.name))"); await client.logout(); exit(3)
+    }
     print("block: device=\(d.name) mac=\(d.mac) blocked=\(d.blocked)")
     // ROUTER_BLOCK_SET=1|0 — только поставить значение и выйти (проверка изнутри устройства, затем снять тем же способом).
     if let set = ProcessInfo.processInfo.environment["ROUTER_BLOCK_SET"] {
+        guard set == "1" || set == "0" else { print("block: ROUTER_BLOCK_SET must be 1 or 0"); await client.logout(); exit(3) }
         try await client.setInternetBlocked(mac: d.mac, blocked: set == "1")
         let now = try await client.snapshot().devices.first { $0.mac == d.mac }
         print("block: set blocked=\(now?.blocked.description ?? "?") name=\(now?.name ?? "?")")
         await client.logout()
         exit(0)
     }
-    try await client.setInternetBlocked(mac: d.mac, blocked: !d.blocked)
-    let after = try await client.snapshot().devices.first { $0.mac == d.mac }
-    print("block: after toggle blocked=\(after?.blocked ?? d.blocked) name=\(after?.name ?? "?")")
-    try await client.setInternetBlocked(mac: d.mac, blocked: d.blocked)
+    var after: RouterDevice?
+    var failure: Error?
+    do {
+        try await client.setInternetBlocked(mac: d.mac, blocked: !d.blocked)
+        after = try await client.snapshot().devices.first { $0.mac == d.mac }
+        print("block: after toggle blocked=\(after?.blocked ?? d.blocked) name=\(after?.name ?? "?")")
+    } catch { failure = error; print("block: toggle check failed:", error.localizedDescription) }
+    // Исходное значение возвращается в любом случае: проверка не должна оставить устройство без интернета.
+    do {
+        try await client.setInternetBlocked(mac: d.mac, blocked: d.blocked)
+    } catch {
+        print("block: RESTORE FAILED, device may stay \(d.blocked ? "unblocked" : "blocked"):", error.localizedDescription); await client.logout(); exit(5)
+    }
     let restored = try await client.snapshot().devices.first { $0.mac == d.mac }
     print("block: restored blocked=\(restored?.blocked ?? !d.blocked) name=\(restored?.name ?? "?")")
-    let ok = after?.blocked == !d.blocked && restored?.blocked == d.blocked && after?.name == d.name && restored?.name == d.name
+    let ok = failure == nil && after?.blocked == !d.blocked && restored?.blocked == d.blocked && after?.name == d.name && restored?.name == d.name
     print("block:", ok ? "OK" : "MISMATCH")
-    if !ok { exit(4) }
+    if !ok { await client.logout(); exit(4) }
 }
 if ProcessInfo.processInfo.environment["ROUTER_REBOOT"] == "1" { try await client.reboot(); print("reboot ok") }
 await client.logout()

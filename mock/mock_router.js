@@ -59,6 +59,7 @@ const rip = { result: 'ZCFG_SUCCESS', Object: [
   { Interface: 'USB', Version: 'RIPv2', RipOpMode: 'Passive', Enable: false, DisableDefaultGw: false }] };
 const dalGet = { paren_ctl: parental, static_route: staticRoute, dns_route: dnsRoute, policy_route: policyRoute, rip };
 const parentalInitial = JSON.stringify(parental.Object);
+const hostsInitial = JSON.stringify(hosts.Object[0].lanhosts);
 // Настоящий роутер возвращает Days строкой через запятую, даже если на запись пришёл массив.
 const norm = (o) => (Array.isArray(o.Days) ? { ...o, Days: o.Days.join(',') } : o);
 https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) }, (req, res) => {
@@ -69,6 +70,7 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
     if (url === '/__test/reset' && req.method === 'POST') {
       session = null; fails = 0; appSockets = new Set(); test = { status: {}, garbageLogin: false, noRsa: false };
       parental.Object.splice(0, parental.Object.length, ...JSON.parse(parentalInitial));
+      hosts.Object[0].lanhosts.splice(0, hosts.Object[0].lanhosts.length, ...JSON.parse(hostsInitial));
       return send(200, { result: 'ok' });
     }
     if (url === '/__test/config' && req.method === 'POST') { Object.assign(test, JSON.parse(body || '{}')); return send(200, { result: 'ok' }); }
@@ -149,13 +151,14 @@ https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFi
         }
         if (oidGet === 'lanhosts') {
           // Блокировка интернета: веб-интерфейс шлёт ровно эти поля; без MacAddress или флага — отказ, как у роутера.
-          if (req.method !== 'PUT' || typeof obj.MacAddress !== 'string' || typeof obj.Internet_Blocking_Enable !== 'boolean' || typeof obj.HostName !== 'string')
+          if (req.method !== 'PUT' || typeof obj.MacAddress !== 'string' || typeof obj.Internet_Blocking_Enable !== 'boolean' || typeof obj.HostName !== 'string' || typeof obj.DeviceIcon !== 'string' || !/^i[a-z]+$/.test(obj.DeviceIcon))
             return send(200, aesEnc(JSON.stringify({ result: 'ZCFG_INVALID_PARAM_VALUE' }), session.aes));
           const h = hosts.Object[0].lanhosts.find(x => x.PhysAddress.toUpperCase() === obj.MacAddress.toUpperCase());
           if (!h) return send(200, aesEnc(JSON.stringify({ result: 'ZCFG_NO_SUCH_OBJECT' }), session.aes));
           h.Internet_Blocking_Enable = obj.Internet_Blocking_Enable;
           // Имя из запроса роутер сохраняет: тесты увидят, если клиент его испортит.
-          if (obj.HostName && obj.HostName !== (h.curHostName || h.DeviceName)) h.curHostName = obj.HostName;
+          if (obj.HostName && obj.HostName !== (h.curHostName || h.DeviceName || h.HostName)) h.curHostName = obj.HostName;
+          h.icon = obj.DeviceIcon; h.DeviceIcon = obj.DeviceIcon;
         }
         session.csrf = crypto.randomBytes(8).toString('hex');
         return send(200, aesEnc(JSON.stringify({ result: 'ZCFG_SUCCESS', sessionkey: session.csrf }), session.aes));

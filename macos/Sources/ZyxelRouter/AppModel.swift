@@ -85,6 +85,10 @@ final class AppModel: ObservableObject {
     @Published var blockingMacs: Set<String> = []
     /// Устройство, для которого открыто подтверждение блокировки.
     @Published var confirmBlockMac: String?
+    /// Ошибка последней блокировки по MAC: показывается в карточке устройства, а не за ней.
+    @Published var blockErrors: [String: String] = [:]
+    /// Растёт при каждой записи блокировки: снимок опроса, начатый до неё, мог застать старый флаг и не применяется.
+    private var blockSeq = 0
 
     private var client: RouterClient?
     private var pollTask: Task<Void, Never>?
@@ -187,6 +191,7 @@ final class AppModel: ObservableObject {
         log = nil
         drops = []
         editorOpen = false
+        resetBlocking()
         error = failure.localizedDescription
         phase = .login
     }
@@ -209,8 +214,12 @@ final class AppModel: ObservableObject {
 
     func refresh() async {
         guard let client else { return }
+        let seq = blockSeq
         do {
-            snapshot = try await client.snapshot()
+            let fresh = try await client.snapshot()
+            // Ответ устарел: за время чтения вышли из сессии или записали блокировку (она сама перечитает снимок).
+            guard self.client === client, blockSeq == seq else { return }
+            snapshot = fresh
             updated = Date()
             setBanner(nil)
         } catch RouterError.sessionExpired {
@@ -277,8 +286,9 @@ final class AppModel: ObservableObject {
     /// Запись с восстановлением сессии: опрос (только чтение) об устаревшем CSRF-токене не узнает.
     private func recovering<T>(_ c: RouterClient, retry: Bool = true, _ block: () async throws -> T) async throws -> T {
         let (user, pass) = (username, password)
-        let result = try await withSessionRecovery(retry: retry, relogin: {
-            guard !pass.isEmpty else { throw RouterError.sessionExpired }
+        let result = try await withSessionRecovery(retry: retry, relogin: { [weak self] in
+            // После выхода (или смены клиента) не входим заново: иначе на роутере осталась бы чужая для приложения сессия.
+            guard !pass.isEmpty, self?.client === c else { throw RouterError.sessionExpired }
             try await c.login(username: user, password: pass)
         }, block)
         writeError = nil
@@ -323,24 +333,35 @@ final class AppModel: ObservableObject {
         } catch { await writeFailed(error, client) }
     }
 
-    /// Блокирует или разрешает устройству интернет; после записи перечитывает снимок, чтобы показать принятое роутером.
+    /// Блокирует или разрешает устройству интернет, затем перечитывает снимок, чтобы показать принятое роутером.
+    /// Запись и чтение разделены: сбой чтения после принятой записи — не отказ, и запись из-за него не повторяется.
     func setInternetBlocked(mac: String, blocked: Bool) async {
-        guard let client, !blockingMacs.contains(mac) else { return }
+        // По одной записи за раз: клиент — actor, и две записи могли бы уйти с одним CSRF-токеном (роутер вращает его).
+        guard let client, !mac.isEmpty, blockingMacs.isEmpty else { return }
         blockingMacs.insert(mac)
-        defer { blockingMacs.remove(mac) }
+        blockErrors[mac] = nil
+        blockSeq += 1
+        defer { if self.client === client { blockingMacs.remove(mac) } }
         do {
             // Флаг ставится, а не переключается, поэтому запись можно повторить после нового входа.
-            let fresh = try await recovering(client) {
-                try await client.setInternetBlocked(mac: mac, blocked: blocked)
-                return try await client.snapshot()
-            }
-            if self.client === client { snapshot = fresh; updated = Date() }
-            banner = nil
+            try await recovering(client) { try await client.setInternetBlocked(mac: mac, blocked: blocked) }
         } catch {
+            guard self.client === client else { return }   // вышли из сессии, пока шла запись
             if sessionLost(error) { return }
-            writeError = error.localizedDescription
-            banner = writeError
+            blockErrors[mac] = error.localizedDescription
+            return
         }
+        blockSeq += 1
+        guard let fresh = try? await client.snapshot(), self.client === client else { return }   // опрос покажет позже
+        snapshot = fresh
+        updated = Date()
+    }
+
+    private func resetBlocking() {
+        blockingMacs = []
+        blockErrors = [:]
+        confirmBlockMac = nil
+        blockSeq += 1
     }
 
     func openNewProfile() {
@@ -458,6 +479,7 @@ final class AppModel: ObservableObject {
         log = nil
         drops = []
         editorOpen = false
+        resetBlocking()
         phase = .login
     }
 

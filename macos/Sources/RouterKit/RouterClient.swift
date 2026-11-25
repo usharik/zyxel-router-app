@@ -244,6 +244,7 @@ public actor RouterClient {
     /// Блокирует или разрешает устройству интернет (флаг роутера «Internet Blocking»). Устройство читается заново:
     /// имя и иконка могли поменяться в веб-интерфейсе, а роутер принимает их вместе с флагом.
     public func setInternetBlocked(mac: String, blocked: Bool) async throws {
+        guard !mac.isEmpty else { throw RouterError.failed("Устройства уже нет в списке роутера; обновите список.") }
         let hosts = Field.list(try await dal("lanhosts")["lanhosts"])
         guard let host = hosts.first(where: { Field.str($0["PhysAddress"]).caseInsensitiveCompare(mac) == .orderedSame }) else {
             throw RouterError.failed("Устройства уже нет в списке роутера; обновите список.")

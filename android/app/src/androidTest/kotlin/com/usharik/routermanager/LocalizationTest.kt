@@ -16,7 +16,7 @@ class LocalizationTest {
         RouterException.BadAddress, RouterException.InvalidCredentials, RouterException.Locked(60), RouterException.SessionExpired,
         RouterException.SessionRefreshed, RouterException.Unreachable, RouterException.BadResponse, RouterException.LoginUnreadable, RouterException.BadLoginData,
         RouterException.DuplicateSession, RouterException.TooManySessions, RouterException.LoginRejected("Wrong"),
-        RouterException.NoData("rip", 404), RouterException.WriteRejected("paren_ctl", 500), RouterException.ProfileNotFound,
+        RouterException.NoData("rip", 404), RouterException.WriteRejected("paren_ctl", 500), RouterException.ProfileNotFound, RouterException.DeviceNotFound,
         RouterException.DeleteRejected(500), RouterException.LogUnavailable(503), RouterException.RebootRejected(500),
         RouterException.CertificateChanged("AB"), IllegalStateException("boom"),
     )

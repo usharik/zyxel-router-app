@@ -1,0 +1,1 @@
+New: block internet for any device with one tap. Open a device and tap “Block internet” — it stays on your home network but can’t reach the internet until you unblock it. Uses the router’s own Internet Blocking switch.

@@ -220,7 +220,8 @@ struct DeviceDetailView: View {
 
     var body: some View {
         // Свежие данные из снимка: после блокировки отметка и кнопка должны смениться, не закрывая окно.
-        let live = model.snapshot?.devices.first { $0.mac == device.mac }
+        let live = model.snapshot?.devices.first { $0.id == device.id }
+        let anyBlocking = !model.blockingMacs.isEmpty
         let d = live ?? device
         let blocking = model.blockingMacs.contains(d.mac)
         VStack(alignment: .leading, spacing: 12) {
@@ -270,12 +271,13 @@ struct DeviceDetailView: View {
                 // Флаг ставится только устройству из ответа роутера: запомненное приложением роутер уже не знает.
                 if live != nil && !d.mac.isEmpty {
                     if d.blocked {
-                        Button("Разблокировать интернет") { Task { await model.setInternetBlocked(mac: d.mac, blocked: false) } }.disabled(blocking)
+                        Button("Разблокировать интернет") { Task { await model.setInternetBlocked(mac: d.mac, blocked: false) } }.disabled(anyBlocking)
                     } else {
-                        Button("Заблокировать интернет", role: .destructive) { model.confirmBlockMac = d.mac }.disabled(blocking)
+                        Button("Заблокировать интернет", role: .destructive) { model.confirmBlockMac = d.mac }.disabled(anyBlocking)
                     }
                     if blocking { ProgressView().controlSize(.small) }
                 }
+                if let err = model.blockErrors[d.mac] { Text(err).font(.caption).foregroundStyle(.red).lineLimit(2) }
                 Spacer()
                 Button("Закрыть", action: onClose).keyboardShortcut(.defaultAction)
             }
@@ -283,7 +285,7 @@ struct DeviceDetailView: View {
         .padding(20)
         .frame(width: 480, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
-        .confirmationDialog("Заблокировать интернет для \(d.name)?", isPresented: Binding(get: { model.confirmBlockMac == d.mac }, set: { if !$0 { model.confirmBlockMac = nil } })) {
+        .confirmationDialog("Заблокировать интернет для \(d.name)?", isPresented: Binding(get: { model.confirmBlockMac == d.mac && live != nil && !d.blocked && !anyBlocking }, set: { if !$0 { model.confirmBlockMac = nil } })) {
             Button("Заблокировать", role: .destructive) { Task { await model.setInternetBlocked(mac: d.mac, blocked: true) } }
             Button("Отмена", role: .cancel) {}
         } message: {

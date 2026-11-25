@@ -102,6 +102,7 @@ class DemoRouter(private val now: () -> Long = System::currentTimeMillis) : Rout
 
     @Synchronized
     override fun setInternetBlocked(mac: String, blocked: Boolean) {
+        if (mac.isEmpty()) throw RouterException.DeviceNotFound
         val host = hosts.items("lanhosts").firstOrNull { it.optString("PhysAddress").equals(mac, ignoreCase = true) }
             ?: throw RouterException.DeviceNotFound
         host.put("Internet_Blocking_Enable", blocked)

@@ -520,7 +520,7 @@ internal fun internetBlockingBody(host: JSONObject, blocked: Boolean): JSONObjec
     // Строки — как прислал роутер, без раскодирования сущностей: «&amp;» вернулся бы символом «&», который прошивка не принимает.
     fun raw(key: String) = (host.opt(key) as? String).orEmpty()
     val name = raw("curHostName").ifEmpty { raw("DeviceName") }.ifEmpty { raw("HostName") }
-    val icon = raw("icon").lowercase().takeIf { it in ROUTER_ICONS } ?: raw("DeviceIcon").ifEmpty { "iothers" }
+    val icon = listOf(raw("icon"), raw("DeviceIcon")).map { it.lowercase() }.firstOrNull { it in ROUTER_ICONS } ?: "iothers"
     return JSONObject()
         .put("HostName", name)
         .put("DeviceIcon", icon)
@@ -776,6 +776,7 @@ class RouterClient(address: String, storedPins: CertificatePins = MemoryCertific
 
     /** Читает устройство заново (имя и иконка могли поменяться в веб-интерфейсе) и меняет только флаг блокировки. */
     override fun setInternetBlocked(mac: String, blocked: Boolean) {
+        if (mac.isEmpty()) throw RouterException.DeviceNotFound
         val host = dal("lanhosts").items("lanhosts").firstOrNull { str(it.opt("PhysAddress")).equals(mac, ignoreCase = true) }
             ?: throw RouterException.DeviceNotFound
         dalWrite("PUT", "lanhosts", internetBlockingBody(host, blocked))

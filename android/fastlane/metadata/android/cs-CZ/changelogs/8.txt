@@ -1,0 +1,1 @@
+Novinka: zablokování internetu libovolnému zařízení jedním klepnutím. Otevřete zařízení a klepněte na „Zablokovat internet“ – zůstane v domácí síti, ale do internetu se nedostane, dokud blokování nezrušíte. Využívá vestavěný přepínač routeru.

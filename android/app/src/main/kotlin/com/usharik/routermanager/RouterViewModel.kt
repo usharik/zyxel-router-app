@@ -86,6 +86,8 @@ data class UiState(
     val routingProgress: Int = 0,
     /** Устройства (MAC), у которых идёт запись блокировки интернета: их кнопка неактивна до ответа роутера. */
     val blockingDevices: Set<String> = emptySet(),
+    /** Ошибка последней блокировки по MAC: карточка устройства показывает её у кнопки, а не в баннере за собой. */
+    val blockErrors: Map<String, String> = emptyMap(),
     val refreshing: Boolean = false,   // обновление по кнопке; фоновый опрос индикатор не показывает
     val saveState: SaveState = SaveState.Idle,
     val rebooting: Boolean = false,
@@ -123,11 +125,11 @@ class RouterViewModel(
         // нового входа. Обработчик вызывается на главном потоке (область сессии — viewModelScope).
         parentalWrites = 0
         writing.clear()
-        pendingBlocks.clear()
+        // Блокировки не трогаем: исключение в другой корутине их запись не прерывает, а свою уборку она делает в finally.
         state.update {
             it.copy(
                 banner = text(RouterException.BadResponse), sectionsBusy = emptySet(), refreshing = false, deletingProfiles = emptySet(),
-                writingParental = emptySet(), blockingDevices = emptySet(), saveState = if (it.saveState == SaveState.InFlight) SaveState.Failed(text(RouterException.BadResponse)) else it.saveState,
+                writingParental = emptySet(), saveState = if (it.saveState == SaveState.InFlight) SaveState.Failed(text(RouterException.BadResponse)) else it.saveState,
                 discovery = if (it.discovery == DiscoveryStatus.Running) DiscoveryStatus.Idle else it.discovery,
             )
         }
@@ -158,6 +160,8 @@ class RouterViewModel(
      * иначе вернул бы старый флаг, и отметка «заблок.» мигнула бы. Только с главного потока.
      */
     private val pendingBlocks = mutableMapOf<String, Boolean>()
+    /** Растёт при записи блокировки: снимок опроса, начатый до неё, мог застать старый флаг и не применяется. Главный поток. */
+    private var blockSeq = 0
     private var writeError: String? = null   // текст ошибки записи; держится, пока запись не пройдёт или баннер не закроют
 
     private val breaks = MutableSharedFlow<AdBreakEvent>(extraBufferCapacity = 4)
@@ -290,29 +294,48 @@ class RouterViewModel(
         if (pendingBlocks.isEmpty()) devices else devices.map { d -> pendingBlocks[d.mac]?.let { d.copy(blocked = it) } ?: d }
 
     /**
-     * Блокирует или разрешает устройству интернет флагом роутера. Отметка в списке меняется сразу, при отказе
-     * роутера возвращается; после записи снимок перечитывается, чтобы показать то, что роутер принял.
+     * Блокирует или разрешает устройству интернет флагом роутера. Отметка в списке меняется сразу; при отказе роутера
+     * она возвращается к значению из последнего снимка. Запись и перечитывание разделены: сбой чтения после принятой
+     * записи — не отказ, и запись из-за него не повторяется.
      */
     fun setInternetBlocked(mac: String, blocked: Boolean) {
         val c = client ?: return
         if (mac.isEmpty() || mac in state.value.blockingDevices) return
         pendingBlocks[mac] = blocked
-        state.update { it.copy(blockingDevices = it.blockingDevices + mac, devices = withPendingBlocks(it.devices)) }
+        blockSeq++
+        state.update { it.copy(blockingDevices = it.blockingDevices + mac, blockErrors = it.blockErrors - mac, devices = withPendingBlocks(it.devices)) }
         session.launch {
             try {
-                // Флаг ставится, а не переключается, поэтому запись можно повторить после нового входа.
-                val snapshot = recovering(c) { c.setInternetBlocked(mac, blocked); c.snapshot() }
+                try {
+                    // Флаг ставится, а не переключается, поэтому запись можно повторить после нового входа.
+                    recovering(c) { c.setInternetBlocked(mac, blocked) }
+                } catch (e: RouterException) {
+                    // Вышли из сессии, пока шла запись: ни баннер, ни отметки, ни вход новой сессии не трогаем.
+                    if (client !== c) return@launch
+                    pendingBlocks.remove(mac)
+                    if (sessionLost(e)) return@launch
+                    val known = state.value.snapshot?.devices?.firstOrNull { it.mac == mac }?.blocked ?: !blocked
+                    state.update { st ->
+                        st.copy(banner = text(e), blockErrors = st.blockErrors + (mac to text(e)), devices = st.devices.map { if (it.mac == mac) it.copy(blocked = known) else it })
+                    }
+                    return@launch
+                }
+                if (client !== c) return@launch
                 writeError = null
-                pendingBlocks.remove(mac)
-                if (client === c) applySnapshot(snapshot)
                 Telemetry.event("internet_blocking_set", mapOf("blocked" to blocked))
-            } catch (e: RouterException) {
+                val seq = ++blockSeq   // опрос, начатый во время записи, тоже мог застать старый флаг
+                val snapshot = try { withContext(Dispatchers.IO) { c.snapshot() } } catch (_: RouterException) { null }
+                if (client !== c) return@launch
                 pendingBlocks.remove(mac)
-                if (sessionLost(e)) return@launch
-                writeError = text(e)
-                state.update { st -> st.copy(banner = text(e), devices = st.devices.map { if (it.mac == mac) it.copy(blocked = !blocked) else it }) }
+                // Не прочиталось — отметка остаётся принятым значением до следующего опроса. Если за это время
+                // началась запись для другого устройства, наш снимок для него устарел: её собственный снимок новее.
+                if (snapshot != null && blockSeq == seq) applySnapshot(snapshot)
             } finally {
-                if (client === c) state.update { it.copy(blockingDevices = it.blockingDevices - mac) }
+                // Карта и набор после конца сессии уже очищены; в новой сессии те же MAC — чужие записи.
+                if (client === c) {
+                    pendingBlocks.remove(mac)
+                    state.update { it.copy(blockingDevices = it.blockingDevices - mac) }
+                }
             }
         }
     }
@@ -322,7 +345,7 @@ class RouterViewModel(
         if (s.demo) return
         val h = historyFor(s.address)
         persistHistory(h.forget(mac))
-        state.update { it.copy(devices = h.merge(it.snapshot?.devices.orEmpty()), identities = it.identities - mac) }
+        state.update { it.copy(devices = withPendingBlocks(h.merge(it.snapshot?.devices.orEmpty())), identities = it.identities - mac) }
         saveIdentities()
     }
 
@@ -510,7 +533,7 @@ class RouterViewModel(
             it.copy(
                 phase = Phase.MAIN, demo = demo, busy = false, loginStep = null, banner = null, identities = identities, discovery = DiscoveryStatus.Idle, knownRouter = !demo || it.knownRouter,
                 parental = null, routing = null, log = null, drops = dropLog.drops.asReversed(), sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false,
-                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), refreshing = false,
+                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), blockErrors = emptyMap(), refreshing = false,
             )
         }
         applySnapshot(snapshot)
@@ -555,7 +578,7 @@ class RouterViewModel(
             it.copy(
                 phase = Phase.LOGIN, snapshot = null, devices = emptyList(), identities = emptyMap(), discovery = DiscoveryStatus.Idle, parental = null, routing = null, log = null, drops = emptyList(), sectionErrors = emptyMap(),
                 error = text(e), busy = false, loginStep = null, saveState = SaveState.Idle, rebooting = false, demo = false,
-                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), refreshing = false,
+                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), blockErrors = emptyMap(), refreshing = false,
                 certificateFingerprint = (e as? RouterException.CertificateChanged)?.fingerprint,
             )
         }
@@ -598,9 +621,10 @@ class RouterViewModel(
     private suspend fun refresh() {
         val c = client ?: return
         val generation = c.sessionGeneration
+        val seq = blockSeq
         try {
             val snapshot = withContext(Dispatchers.IO) { c.snapshot() }
-            if (client === c) applySnapshot(snapshot)
+            if (client === c && blockSeq == seq) applySnapshot(snapshot)
         } catch (_: RouterException.SessionExpired) {
             relogin(c, generation)
         } catch (e: RouterException.CertificateChanged) {
@@ -613,12 +637,13 @@ class RouterViewModel(
     private suspend fun relogin(c: RouterApi, generation: Int) {
         val s = state.value
         if (s.password.isEmpty() && !s.demo) return loginFailed(RouterException.SessionExpired)
+        val seq = blockSeq
         try {
             val snapshot = withContext(Dispatchers.IO) {
                 c.reloginIfUnchanged(generation, s.username, s.password)
                 c.snapshot()
             }
-            if (client === c) applySnapshot(snapshot)
+            if (client === c && blockSeq == seq) applySnapshot(snapshot)
         } catch (e: RouterException) {
             if (keepPollingAfterReloginFailure(e)) state.update { it.copy(banner = bannerAfterRefresh(text(e), it.banner)) } else loginFailed(e)
         }
@@ -810,7 +835,7 @@ class RouterViewModel(
             it.copy(
                 phase = Phase.LOGIN, password = if (s.demo) it.password else "", snapshot = null, devices = emptyList(), identities = emptyMap(), discovery = DiscoveryStatus.Idle, parental = null, routing = null,
                 log = null, drops = emptyList(), sectionErrors = emptyMap(), saveState = SaveState.Idle, rebooting = false, banner = null, error = null, demo = false,
-                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), refreshing = false,
+                sectionsBusy = emptySet(), deletingProfiles = emptySet(), writingParental = emptySet(), blockingDevices = emptySet(), blockErrors = emptyMap(), refreshing = false,
             )
         }
         if (c != null && !s.demo) viewModelScope.launch(Dispatchers.IO) { c.logout() }

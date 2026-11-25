@@ -814,6 +814,7 @@ private fun Devices(state: UiState, vm: RouterViewModel) {
             // Флаг ставится только устройству из ответа роутера: запомненное приложением роутер уже не знает.
             onBlock = if (d.mac.isNotEmpty() && d.mac in liveMacs) ({ blocked -> vm.setInternetBlocked(d.mac, blocked) }) else null,
             blocking = d.mac in state.blockingDevices,
+            blockError = state.blockErrors[d.mac],
         ) { selectedKey = null }
     }
 }
@@ -897,21 +898,13 @@ private fun DetailRow(label: String, value: String, modifier: Modifier = Modifie
 @Composable
 internal fun DeviceDetailsDialog(
     d: RouterDevice, vendor: String?, identity: NetworkIdentity?, onForget: (() -> Unit)? = null,
-    onBlock: ((blocked: Boolean) -> Unit)? = null, blocking: Boolean = false, onClose: () -> Unit,
+    onBlock: ((blocked: Boolean) -> Unit)? = null, blocking: Boolean = false, blockError: String? = null, onClose: () -> Unit,
 ) {
     var showAll by rememberSaveable { mutableStateOf(false) }
     var confirmBlock by rememberSaveable { mutableStateOf(false) }
+    // Устройство пропало из ответа роутера или его заблокировали в другом месте — подтверждать нечего.
+    LaunchedEffect(onBlock == null, d.blocked) { if (onBlock == null || d.blocked) confirmBlock = false }
     TrackOverlay()
-    if (confirmBlock && onBlock != null) {
-        AlertDialog(
-            onDismissRequest = { confirmBlock = false },
-            confirmButton = { TextButton({ confirmBlock = false; onBlock(true) }) { Text(stringResource(R.string.block), color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton({ confirmBlock = false }) { Text(stringResource(R.string.cancel)) } },
-            icon = { Icon(Icons.Default.Block, null) },
-            title = { Text(stringResource(R.string.block_confirm_title, d.name), style = MaterialTheme.typography.titleMedium) },
-            text = { Text(stringResource(R.string.block_confirm_text)) },
-        )
-    }
     AlertDialog(
         onDismissRequest = onClose,
         confirmButton = { TextButton(onClose) { Text(stringResource(R.string.close)) } },
@@ -944,11 +937,14 @@ internal fun DeviceDetailsDialog(
                         if (blocking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         else Icon(if (d.blocked) Icons.Default.Public else Icons.Default.Block, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
+                        // Отметка меняется сразу, поэтому во время записи подпись — то действие, что выполняется, а не следующее.
+                        val unblockLabel = if (blocking) !d.blocked else d.blocked
                         Text(
-                            if (d.blocked) stringResource(R.string.unblock_internet) else stringResource(R.string.block_internet),
+                            if (unblockLabel) stringResource(R.string.unblock_internet) else stringResource(R.string.block_internet),
                             color = if (d.blocked || blocking) Color.Unspecified else MaterialTheme.colorScheme.error,
                         )
                     }
+                    if (blockError != null) Text(blockError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 if (d.connection.contains("wi-fi", ignoreCase = true)) {
                     if (d.signal > 0) DetailRow(stringResource(R.string.signal), "▮".repeat(d.signal) + "▯".repeat((5 - d.signal).coerceAtLeast(0)))
@@ -967,6 +963,17 @@ internal fun DeviceDetailsDialog(
             }
         },
     )
+    // После основного окна: иначе после поворота экрана подтверждение оказалось бы под карточкой.
+    if (confirmBlock && onBlock != null && !d.blocked && !blocking) {
+        AlertDialog(
+            onDismissRequest = { confirmBlock = false },
+            confirmButton = { TextButton({ confirmBlock = false; onBlock(true) }) { Text(stringResource(R.string.block), color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton({ confirmBlock = false }) { Text(stringResource(R.string.cancel)) } },
+            icon = { Icon(Icons.Default.Block, null) },
+            title = { Text(stringResource(R.string.block_confirm_title, d.name), style = MaterialTheme.typography.titleMedium) },
+            text = { Text(stringResource(R.string.block_confirm_text)) },
+        )
+    }
 }
 
 /** Ключ сети для окна «Поделиться»: место в списке роутера и имя — по ним же сверяется пароль. */

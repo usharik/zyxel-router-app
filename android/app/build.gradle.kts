@@ -27,8 +27,8 @@ android {
         // Android 17 (target 37) requires a runtime local-network permission; target 36 keeps access to the router simple.
         // Google Play принимает target 36 для новых приложений и обновлений до 31.08.2027.
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.4.0"
+        versionCode = 8
+        versionName = "1.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
